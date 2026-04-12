@@ -1,0 +1,140 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+// ------------------------------------------------------
+// USER & AUTHENTICATION
+// ------------------------------------------------------
+model User {
+  id                 String    @id @default(auto()) @map("_id") @db.ObjectId
+  email              String    @unique
+  password           String
+  name               String
+  role               String    @default("user")
+  isAdmin            Boolean   @default(false)
+  
+  // Credits & Usage
+  wordCredits        Int       @default(10000)
+  totalWordsUsed     Int       @default(0)
+  currentMonthUsage  Int       @default(0)
+  usageCredits       Int       @default(0)
+  credits            Int       @default(0)
+  creditUsage        Int       @default(0)
+  maxCredits         Int?
+  
+  // Subscription & Billing
+  plan               String    @default("free")
+  status             String    @default("active")
+  subscriptionStatus String?
+  
+  // Profile Information
+  avatar             String?
+  phone              String?
+  location           String?
+  company            String?
+  bio                String?
+  
+  // Security & Settings (Stored as JSON/Embedded)
+  emailVerified      Boolean   @default(false)
+  lastLogin          DateTime?
+  preferences        Json?     
+  security           Json?     
+  subscription       Json?     
+  
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  // Relations
+  contents           Content[]
+  keywords           Keyword[]
+  sites              WordPressSite[]
+}
+
+// ------------------------------------------------------
+// CONTENT MANAGEMENT
+// ------------------------------------------------------
+model Content {
+  id                 String    @id @default(auto()) @map("_id") @db.ObjectId
+  title              String?
+  content            String?
+  excerpt            String?
+  metaDescription    String?
+  slug               String?
+  
+  type               String    @default("article") 
+  status             String    @default("draft")   
+  
+  // SEO & Metrics
+  keywords           String[]  
+  primaryKeyword     String?
+  seoScore           Int?
+  wordCount          Int       @default(0)
+  readingTime        Int?
+  
+  // WordPress Sync Data
+  wordpressPostId    String?
+  publishedUrl       String?
+  
+  // Scheduling & Metadata
+  scheduledFor       DateTime?
+  tags               String[]
+  aiGenerated        Boolean   @default(true)
+
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  // Relations
+  userId             String    @db.ObjectId
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  siteId             String?   @db.ObjectId
+  site               WordPressSite? @relation(fields: [siteId], references: [id], onDelete: SetNull)
+}
+
+// ------------------------------------------------------
+// KEYWORD RESEARCH
+// ------------------------------------------------------
+model Keyword {
+  id             String    @id @default(auto()) @map("_id") @db.ObjectId
+  keyword        String    
+  term           String?   
+  volume         Int       @default(0)
+  difficulty     Int       @default(0)
+  cpc            Float     @default(0)
+  competition    Float?    @default(0)
+  searchIntent   String?
+  status         String    @default("active")
+  
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  // Relations
+  userId         String    @db.ObjectId
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ------------------------------------------------------
+// INTEGRATIONS (WORDPRESS)
+// ------------------------------------------------------
+model WordPressSite {
+  id                  String    @id @default(auto()) @map("_id") @db.ObjectId
+  name                String
+  url                 String
+  apiUrl              String?
+  username            String
+  applicationPassword String
+  
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  // Relations
+  userId              String    @db.ObjectId
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  contents            Content[]
+}

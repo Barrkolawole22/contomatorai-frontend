@@ -1,0 +1,112 @@
+export interface Content {
+  id: string;
+  title: string;
+  body: string;
+  summary?: string;
+  keywords?: string[];
+  status: ContentStatus;
+  type: ContentType;
+  publishedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+  userId: string;
+  metadata?: ContentMetadata;
+  tags?: string[];
+  wordCount?: number;
+  readingTime?: number;
+  seoScore?: number;
+  aiGenerated: boolean;
+  seoAnalysis?: SEOAnalysis;
+  wordPressPublications?: WordPressPublication[];
+  excerpt?: string;
+  publishedUrl?: string;
+  wordpressSite?: string;
+}
+
+export type ContentStatus = 'draft' | 'published' | 'archived' | 'scheduled';
+
+export type ContentType = 'blog' | 'article' | 'landing' | 'product' | 'custom';
+
+export interface ContentMetadata {
+  metaTitle?: string;
+  metaDescription?: string;
+  focusKeyword?: string;
+  canonicalUrl?: string;
+  robots?: string;
+  ogTitle?: string;
+  ogDescription?: string;
+  ogImage?: string;
+  twitterTitle?: string;
+  twitterDescription?: string;
+  twitterImage?: string;
+  slug?: string;
+}
+
+export interface SEOAnalysis {
+  score: number;
+  readabilityScore: number;
+  keywordDensity: number;
+  issues: SEOIssue[];
+  recommendations: string[];
+}
+
+export interface SEOIssue {
+  severity: 'critical' | 'warning' | 'info';
+  message: string;
+  details?: string;
+}
+
+export interface WordPressPublication {
+  id: string;
+  siteId: string;
+  siteName: string;
+  postId: number;
+  postUrl: string;
+  status: string;
+  publishedAt: string;
+}
+
+export interface ContentCreationRequest {
+  title: string;
+  type: ContentType;
+  keywords?: string[];
+  outline?: string;
+  prompt?: string;
+  tone?: string;
+  length?: 'short' | 'medium' | 'long';
+  targetAudience?: string;
+}
+
+export interface ContentUpdateRequest {
+  title?: string;
+  body?: string;
+  summary?: string;
+  keywords?: string[];
+  status?: ContentStatus;
+  type?: ContentType;
+  tags?: string[];
+  metadata?: ContentMetadata;
+  excerpt?: string;
+  scheduledFor?: string;
+}
+
+export interface ContentFilterOptions {
+  status?: ContentStatus;
+  type?: ContentType;
+  search?: string;
+  tag?: string;
+  startDate?: string;
+  endDate?: string;
+  page?: number;
+  limit?: number;
+  sortBy?: 'createdAt' | 'updatedAt' | 'publishedAt' | 'title';
+  sortOrder?: 'asc' | 'desc';
+}
+
+export interface ContentListResponse {
+  content: Content[];
+  total: number;
+  page: number;
+  limit: number;
+  pages: number;
+}
