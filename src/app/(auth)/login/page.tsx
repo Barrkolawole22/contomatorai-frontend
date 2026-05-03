@@ -346,7 +346,7 @@ export default function LoginPage() {
       <div className="mt-6 grid grid-cols-2 gap-3">
         {/* Google OAuth button */}
         <a
-          href="http://localhost:5000/api/auth/google"
+          href={`${process.env.NEXT_PUBLIC_API_URL}/api/auth/google`}
           className={`w-full inline-flex justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 ${isFormLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
           onClick={(e) => {
             if (isFormLoading) e.preventDefault();
@@ -364,7 +364,7 @@ export default function LoginPage() {
 
         {/* Twitter OAuth button */}
         <a
-          href="http://localhost:5000/api/auth/twitter"
+          href={`${process.env.NEXT_PUBLIC_API_URL}/api/auth/twitter`}
           className={`w-full inline-flex justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 ${isFormLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
           onClick={(e) => {
             if (isFormLoading) e.preventDefault();
