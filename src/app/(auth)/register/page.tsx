@@ -45,6 +45,19 @@ export default function RegisterPage() {
     };
   };
 
+  const generateStrongPassword = () => {
+    const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*';
+    let password = '';
+    password += 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[Math.floor(Math.random() * 26)];
+    password += 'abcdefghijklmnopqrstuvwxyz'[Math.floor(Math.random() * 26)];
+    password += '0123456789'[Math.floor(Math.random() * 10)];
+    password += '!@#$%^&*'[Math.floor(Math.random() * 8)];
+    for (let i = 0; i < 8; i++) {
+      password += chars[Math.floor(Math.random() * chars.length)];
+    }
+    return password.split('').sort(() => Math.random() - 0.5).join('');
+  };
+
   const validateField = (name: string, value: string) => {
     const errors: Record<string, string> = {};
 
@@ -86,7 +99,7 @@ export default function RegisterPage() {
     try {
       const allErrors: Record<string, string> = {};
       Object.keys(formData).forEach(key => {
-        if (key !== 'company' && key !== 'receiveUpdates') {
+        if (key !== 'company' && key !== 'receiveUpdates' && key !== 'agreeToTerms') {
           const fieldErrors = validateField(key, formData[key as keyof typeof formData] as string);
           Object.assign(allErrors, fieldErrors);
         }
@@ -103,9 +116,9 @@ export default function RegisterPage() {
       }
 
       const fullName = `${formData.firstName.trim()} ${formData.lastName.trim()}`;
-      await register(formData.email.trim(), formData.password, fullName,);
+      await register(formData.email.trim(), formData.password, fullName);
       router.push('/dashboard');
-      
+
     } catch (error: any) {
       console.error('Registration error:', error);
       setError(error.message || 'Registration failed. Please try again.');
@@ -117,7 +130,7 @@ export default function RegisterPage() {
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value, type, checked } = e.target;
     const newValue = type === 'checkbox' ? checked : value;
-    
+
     setFormData(prev => ({
       ...prev,
       [name]: newValue
@@ -278,14 +291,29 @@ export default function RegisterPage() {
                 className="text-gray-400 hover:text-gray-600"
                 onClick={() => setShowPassword(!showPassword)}
               >
-                {showPassword ? (
-                  <EyeOff className="h-5 w-5" />
-                ) : (
-                  <Eye className="h-5 w-5" />
-                )}
+                {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
               </button>
             </div>
           </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              const pwd = generateStrongPassword();
+              setFormData(prev => ({ ...prev, password: pwd, confirmPassword: pwd }));
+              setShowPassword(true);
+              setValidationErrors(prev => {
+                const next = { ...prev };
+                delete next.password;
+                delete next.confirmPassword;
+                return next;
+              });
+            }}
+            className="mt-1 text-xs text-blue-600 hover:text-blue-800"
+          >
+            Suggest strong password
+          </button>
+
           {formData.password && (
             <div className="mt-2 space-y-1">
               <div className="text-xs space-y-1">
@@ -308,7 +336,7 @@ export default function RegisterPage() {
               </div>
             </div>
           )}
-          
+
           {validationErrors.password && (
             <p className="mt-1 text-xs text-red-600">{validationErrors.password}</p>
           )}
@@ -340,11 +368,7 @@ export default function RegisterPage() {
                 className="text-gray-400 hover:text-gray-600"
                 onClick={() => setShowConfirmPassword(!showConfirmPassword)}
               >
-                {showConfirmPassword ? (
-                  <EyeOff className="h-5 w-5" />
-                ) : (
-                  <Eye className="h-5 w-5" />
-                )}
+                {showConfirmPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
               </button>
             </div>
           </div>
@@ -359,7 +383,6 @@ export default function RegisterPage() {
               id="agreeToTerms"
               name="agreeToTerms"
               type="checkbox"
-              required
               checked={formData.agreeToTerms}
               onChange={handleChange}
               className={`h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded mt-0.5 ${
@@ -425,7 +448,7 @@ export default function RegisterPage() {
 
       <div className="mt-6 grid grid-cols-2 gap-3">
         <a
-          href="http://localhost:5000/api/auth/google"
+          href={`${process.env.NEXT_PUBLIC_API_URL}/auth/google`}
           className={`w-full inline-flex justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
           onClick={(e) => {
             if (isLoading) e.preventDefault();
@@ -442,7 +465,7 @@ export default function RegisterPage() {
         </a>
 
         <a
-          href="http://localhost:5000/api/auth/twitter"
+          href={`${process.env.NEXT_PUBLIC_API_URL}/auth/twitter`}
           className={`w-full inline-flex justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
           onClick={(e) => {
             if (isLoading) e.preventDefault();
