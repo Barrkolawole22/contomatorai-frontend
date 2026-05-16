@@ -257,20 +257,45 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const login = useCallback(async (email: string, password: string, rememberMe?: boolean) => {
     try {
+      console.log('🔑 Attempting login to:', process.env.NEXT_PUBLIC_API_URL);
+
       const response = await authAPI.login({ email, password });
 
       if (response.data.success) {
         const { token, user: userData } = response.data;
         const formattedUser = formatUserData(userData);
-        
-        localStorage.setItem('token', token);
-        localStorage.setItem('user', JSON.stringify(formattedUser));
+
+        // Store in localStorage with error handling
+        try {
+          localStorage.setItem('token', token);
+          localStorage.setItem('user', JSON.stringify(formattedUser));
+        } catch (storageError) {
+          console.error('❌ Failed to store auth data in localStorage:', storageError);
+          throw new Error('Failed to save login session. Please check your browser settings.');
+        }
+
         setUser(formattedUser);
+        console.log('✅ Login successful');
       } else {
         throw new Error(response.data.message || 'Login failed');
       }
     } catch (error: any) {
-      throw new Error(error.response?.data?.message || 'Login failed');
+      console.error('❌ Login error:', error);
+
+      // Handle different error types
+      if (error.code === 'NETWORK_ERROR' || error.message?.includes('Network Error')) {
+        throw new Error('Unable to connect to server. Please check your internet connection.');
+      }
+
+      if (error.response?.status === 429) {
+        throw new Error('Too many login attempts. Please try again later.');
+      }
+
+      if (error.response?.status === 500) {
+        throw new Error('Server error. Please try again later.');
+      }
+
+      throw new Error(error.response?.data?.message || error.message || 'Login failed. Please check your credentials.');
     }
   }, [formatUserData]);
 

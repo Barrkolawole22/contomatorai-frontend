@@ -70,10 +70,11 @@ export async function POST(req: Request) {
       }, { status: 400 });
     }
 
-    // Generic fallback error
+    // Generic fallback error with proper type checking
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json({
       success: false,
-      message: error.message || "Unknown error",
+      message: errorMessage,
     }, { status: 500 });
   }
 }

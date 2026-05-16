@@ -7,7 +7,11 @@ declare module 'axios' {
   }
 }
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || (
+  typeof window !== 'undefined'
+    ? `${window.location.protocol}//${window.location.host}/api`
+    : 'http://localhost:5000/api'
+);
 
 // 🚀 RATE LIMITING CONFIGURATION
 const RATE_LIMIT_CONFIG = {
@@ -131,27 +135,40 @@ api.interceptors.response.use(
       const duration = new Date().getTime() - response.config.metadata.startTime.getTime();
       console.log(`✅ ${response.config.method?.toUpperCase()} ${response.config.url} - ${duration}ms`);
     }
-    
+
     return response;
   },
   (error: AxiosError) => {
-    // Log errors in development
-    if (process.env.NODE_ENV === 'development') {
-      console.error(`❌ ${error.config?.method?.toUpperCase()} ${error.config?.url} - ${error.response?.status}`);
+    // Enhanced error logging
+    const method = error.config?.method?.toUpperCase() || 'UNKNOWN';
+    const url = error.config?.url || 'UNKNOWN';
+    const status = error.response?.status || 'NETWORK_ERROR';
+
+    console.error(`❌ API Error: ${method} ${url} - Status: ${status}`, {
+      message: error.message,
+      data: error.response?.data,
+      headers: error.response?.headers
+    });
+
+    // Handle specific Vercel deployment issues
+    if (error.code === 'NETWORK_ERROR' || !error.response) {
+      console.error('🌐 Network error - likely API URL configuration issue');
+      // Don't redirect on network errors, let the component handle it
     }
 
     if (error.response?.status === 401 && typeof window !== 'undefined') {
       // Clear auth data
       localStorage.removeItem('token');
       localStorage.removeItem('user');
-      
+
       // Only redirect if we're not already on a login/auth page
       const currentPath = window.location.pathname;
-      if (!currentPath.includes('/login') && !currentPath.includes('/register')) {
-        window.location.href = '/login';
+      if (!currentPath.includes('/login') && !currentPath.includes('/register') && !currentPath.includes('/auth')) {
+        console.log('🔄 Redirecting to login due to 401');
+        window.location.href = '/login?error=session_expired';
       }
     }
-    
+
     return Promise.reject(error);
   }
 );

@@ -94,6 +94,14 @@ export default function LoginPage() {
       console.error('❌ Login failed:', err);
       if (err instanceof z.ZodError) {
         setError(err.errors[0].message);
+      } else if (err.code === 'NETWORK_ERROR' || err.message?.includes('Network Error') || err.message?.includes('connect ECONNREFUSED')) {
+        setError('Unable to connect to server. Please check your internet connection or contact support if the issue persists.');
+      } else if (err.response?.status === 429) {
+        setError('Too many login attempts. Please wait a few minutes before trying again.');
+      } else if (err.response?.status === 500) {
+        setError('Server error. Our team has been notified. Please try again later.');
+      } else if (err.response?.status === 401) {
+        setError('Invalid email or password. Please check your credentials.');
       } else {
         setError(err.message || 'Login failed. Please check your credentials.');
       }

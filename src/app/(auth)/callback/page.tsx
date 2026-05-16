@@ -11,35 +11,41 @@ export default function AuthCallbackPage() {
   useEffect(() => {
     const handleCallback = async () => {
       try {
-        // Get token from URL
         const token = searchParams?.get('token');
         const refreshToken = searchParams?.get('refreshToken');
         const errorParam = searchParams?.get('error');
 
-        // Check for error
         if (errorParam) {
-          setError(errorParam === 'google-auth-failed' 
-            ? 'Google authentication failed. Please try again.' 
+          setError(errorParam === 'google-auth-failed'
+            ? 'Google authentication failed. Please try again.'
             : 'Authentication error occurred.');
-          
           setTimeout(() => router.replace('/login'), 3000);
           return;
         }
 
-        // Check for token
         if (!token) {
           setError('No authentication token received.');
           setTimeout(() => router.replace('/login'), 3000);
           return;
         }
 
-        // Store tokens
         localStorage.setItem('token', token);
         if (refreshToken) {
           localStorage.setItem('refreshToken', refreshToken);
         }
 
-        // Hard redirect to dashboard to force AuthProvider to re-read localStorage
+        // Fetch and store user data before redirecting so AuthProvider
+        // finds both token + user in localStorage on dashboard load
+        try {
+          const { authAPI } = await import('@/lib/api');
+          const response = await authAPI.getCurrentUser();
+          if (response.data.success) {
+            localStorage.setItem('user', JSON.stringify(response.data.user));
+          }
+        } catch (e) {
+          // proceed anyway — AuthProvider will fetch on mount
+        }
+
         window.location.href = '/dashboard';
 
       } catch (err) {
