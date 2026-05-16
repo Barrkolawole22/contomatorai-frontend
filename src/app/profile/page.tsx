@@ -185,7 +185,7 @@ const ProfilePage = () => {
   useEffect(() => {
     if (user && !saving) {
       setProfile(prev => {
-        const avatarUrl = processAvatarUrl(user.avatar || prev.avatar);
+        const avatarUrl = processAvatarUrl(user.avatar || prev.avatar || '');
         
         return {
           ...prev,

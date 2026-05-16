@@ -1,6 +1,7 @@
 // ========================================
 // 1. app/layout.tsx (Root Layout - FIXED)
 // ========================================
+// @ts-ignore: CSS module declarations are handled by Next.js global styles
 import './globals.css';
 import { ReactNode } from 'react';
 import { AuthProvider } from '@/context/AuthProvider';

@@ -209,7 +209,7 @@ const WYSIWYGEditor = ({
     const range = selection.getRangeAt(0);
     let element = range.commonAncestorContainer;
     while (element && element.nodeType !== Node.ELEMENT_NODE) {
-      element = element.parentNode;
+      element = element.parentNode as Node;
     }
     if (element && element.nodeType === Node.ELEMENT_NODE) {
       const blockElement = (element as Element).closest('p, h1, h2, h3, h4, h5, h6, div') || element;
@@ -276,7 +276,7 @@ const WYSIWYGEditor = ({
     e.preventDefault();
     const selection = window.getSelection();
     let selectedText = '';
-    let range = null;
+    let range: Range | null = null;
     if (selection && selection.rangeCount > 0) {
       range = selection.getRangeAt(0).cloneRange();
       if (!selection.isCollapsed) {

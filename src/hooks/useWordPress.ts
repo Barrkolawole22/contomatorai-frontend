@@ -46,6 +46,12 @@ interface ConnectionTestResult {
   error?: string;
 }
 
+interface BulkUpdateResult {
+  siteId: string;
+  success: boolean;
+  error?: string;
+}
+
 export const useWordPress = () => {
   const [sites, setSites] = useState<WordPressSite[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -309,7 +315,7 @@ export const useWordPress = () => {
 
   // ✅ NEW: Bulk operations
   const bulkUpdateSites = async (siteIds: string[], action: 'sync' | 'test' | 'activate' | 'deactivate') => {
-    const results = [];
+    const results: { siteId: string; success: boolean; error?: string }[] = [];
     
     for (const siteId of siteIds) {
       try {

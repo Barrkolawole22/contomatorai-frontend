@@ -1,9 +1,4 @@
 {
-  "env": {
-    "NEXT_PUBLIC_API_URL": "@next_public_api_url",
-    "NEXT_PUBLIC_APP_URL": "@next_public_app_url",
-    "NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY": "@paystack_public_key"
-  },
   "rewrites": [
     {
       "source": "/api/:path*",

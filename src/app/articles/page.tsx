@@ -217,7 +217,7 @@ export default function ArticlesPage() {
       }
 
       // Handle different response formats
-      let articles = [];
+      let articles: any[] = [];
       if (response?.data?.success && response.data.data) {
         // Format: { success: true, data: { success: true, data: [...] } }
         articles = response.data.data;

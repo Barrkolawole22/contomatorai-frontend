@@ -401,7 +401,7 @@ export default function BillingPage() {
               <div className="relative">
                 {(() => {
                   // Get last 7 days
-                  const last7Days = [];
+                  const last7Days: { date: string; words: number; displayDate: Date }[] = [];
                   for (let i = 6; i >= 0; i--) {
                     const date = new Date();
                     date.setDate(date.getDate() - i);
@@ -423,7 +423,7 @@ export default function BillingPage() {
                   const maxWords = Math.max(...last7Days.map(d => d.words), 100);
                   const scales = [100, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000];
                   const maxScale = scales.find(s => s >= maxWords) || Math.ceil(maxWords / 1000) * 1000;
-                  const yAxisLabels = [];
+                  const yAxisLabels: number[] = [];
                   
                   if (maxScale <= 1000) {
                     yAxisLabels.push(0, 100, 500, 1000);

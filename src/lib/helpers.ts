@@ -450,7 +450,7 @@ export function calculateContentScore(
  * Generate content suggestions based on keywords
  */
 export function generateContentSuggestions(keywords: string[]): string[] {
-  const suggestions = [];
+  const suggestions: string[] = [];
   
   for (const keyword of keywords.slice(0, 3)) {
     suggestions.push(`How to ${keyword}: A Complete Guide`);
