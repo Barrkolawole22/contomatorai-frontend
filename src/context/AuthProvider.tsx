@@ -18,7 +18,6 @@ export interface User {
   credits: number;
   creditUsage?: number;
   
-  // ✅ Added missing properties required by dashboard layout
   remainingCredits?: number;
   usedCredits?: number;
   subscriptionPlan?: string;
@@ -36,7 +35,6 @@ export interface User {
   company?: string;
   bio?: string;
   preferences?: {
-    // ✅ Updated to strict literal types to fix Profile/Settings errors
     theme?: 'system' | 'light' | 'dark';
     defaultContentType?: 'blog' | 'article' | 'social' | 'email' | 'product' | 'landing';
     language?: string;
@@ -86,7 +84,6 @@ interface AuthContextType {
     percentage: number;
     canAfford: (words: number) => boolean;
   };
-  // ✅ Added missing resetPassword method for ForgotPasswordForm
   resetPassword: (email: string) => Promise<void>;
 }
 
@@ -165,7 +162,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       credits: userData.credits || userData.wordCredits || 0,
       creditUsage: userData.creditUsage || userData.currentMonthUsage || 0,
       
-      // ✅ Map new properties accurately for UI components
       remainingCredits: userData.credits || userData.usageCredits || userData.wordCredits || 0,
       usedCredits: userData.creditUsage || userData.currentMonthUsage || userData.usedCredits || 0,
       subscriptionPlan: userPlan,
@@ -265,7 +261,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         const { token, user: userData } = response.data;
         const formattedUser = formatUserData(userData);
 
-        // Store in localStorage with error handling
         try {
           localStorage.setItem('token', token);
           localStorage.setItem('user', JSON.stringify(formattedUser));
@@ -282,7 +277,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     } catch (error: any) {
       console.error('❌ Login error:', error);
 
-      // Handle different error types
       if (error.code === 'NETWORK_ERROR' || error.message?.includes('Network Error')) {
         throw new Error('Unable to connect to server. Please check your internet connection.');
       }
@@ -309,19 +303,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       });
 
       if (response.data.success) {
-        const { token, user: userData } = response.data;
-        const formattedUser = formatUserData(userData);
-        
-        localStorage.setItem('token', token);
-        localStorage.setItem('user', JSON.stringify(formattedUser));
-        setUser(formattedUser);
+        if (response.data.requiresVerification) {
+          throw new Error('VERIFICATION_REQUIRED');
+        }
       } else {
         throw new Error(response.data.message || 'Registration failed');
       }
     } catch (error: any) {
-      throw new Error(error.response?.data?.message || 'Registration failed');
+      throw new Error(error.response?.data?.message || error.message || 'Registration failed');
     }
-  }, [formatUserData]);
+  }, []);
 
   const logout = useCallback(() => {
     localStorage.removeItem('token');
@@ -431,7 +422,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     };
   }, [user]);
 
-  // ✅ Added stub for resetPassword
   const resetPassword = useCallback(async (email: string) => {
     try {
       await authAPI.post('/auth/reset-password', { email });

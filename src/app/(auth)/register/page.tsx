@@ -121,7 +121,11 @@ export default function RegisterPage() {
 
     } catch (error: any) {
       console.error('Registration error:', error);
-      setError(error.message || 'Registration failed. Please try again.');
+      if (error.message === 'VERIFICATION_REQUIRED') {
+        router.push(`/register/verify-email?email=${encodeURIComponent(formData.email)}`);
+        return;
+      }
+      setError(error.message || 'Registration failed');
     } finally {
       setIsLoading(false);
     }
