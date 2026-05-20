@@ -21,11 +21,12 @@ import {
   Layers,
   Calendar,
   Sparkles,
-  HelpCircle, // Added icon
-  Phone,        // Added icon
-  ExternalLink,  // Added icon
+  HelpCircle,
+  Phone,
+  ExternalLink,
   ChevronUp,
-  ChevronDown
+  ChevronDown,
+  BookOpen   // NEW icon for Knowledgebase
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthProvider';
 import NotificationDropdown from '@/components/NotificationDropdown';
@@ -44,11 +45,10 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
   const [darkMode, setDarkMode] = useState(false);
   const [redirectHandled, setRedirectHandled] = useState(false);
   const [notificationOpen, setNotificationOpen] = useState(false);
-  const [helpOpen, setHelpOpen] = useState(false); // Added state for help dropdown
+  const [helpOpen, setHelpOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [debugCollapsed, setDebugCollapsed] = useState(true);
 
-  // Refs for dropdowns
   const notificationButtonRef = useRef<HTMLButtonElement>(null);
   const helpButtonRef = useRef<HTMLButtonElement>(null);
   const notificationPanelRef = useRef<HTMLDivElement>(null);
@@ -59,7 +59,6 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     if (typeof window !== 'undefined') {
       const savedTheme = localStorage.getItem('theme');
       const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-
       if (savedTheme === 'dark' || (!savedTheme && prefersDark)) {
         setDarkMode(true);
         document.documentElement.classList.add('dark');
@@ -84,7 +83,6 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
   // Click outside handler for dropdowns
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      // Close notification dropdown
       if (
         notificationOpen &&
         notificationButtonRef.current &&
@@ -94,8 +92,6 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
       ) {
         setNotificationOpen(false);
       }
-
-      // Close help dropdown
       if (
         helpOpen &&
         helpButtonRef.current &&
@@ -106,19 +102,16 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
         setHelpOpen(false);
       }
     };
-
     document.addEventListener('mousedown', handleClickOutside);
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [notificationOpen, helpOpen]);
 
-
   // Load unread notification count
   useEffect(() => {
     if (isAuthenticated) {
       loadUnreadCount();
-      // Refresh count every 30 seconds
       const interval = setInterval(loadUnreadCount, 30000);
       return () => clearInterval(interval);
     }
@@ -126,7 +119,6 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
 
   const loadUnreadCount = async () => {
     try {
-      // This logic is correct based on your controller
       const response = await notificationAPI.getUnreadCount();
       if (response.data.success) {
         setUnreadCount(response.data.data.count);
@@ -139,7 +131,6 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
   const toggleDarkMode = () => {
     const newDarkMode = !darkMode;
     setDarkMode(newDarkMode);
-    
     if (newDarkMode) {
       document.documentElement.classList.add('dark');
       localStorage.setItem('theme', 'dark');
@@ -189,6 +180,14 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
       icon: Layers,
       current: pathname === '/bulk-create',
       badge: { text: 'New', color: 'bg-green-500' }
+    },
+    // -- NEW Knowledgebase item inserted here --
+    {
+      name: 'Knowledgebase',
+      href: '/knowledgebase',
+      icon: BookOpen,
+      current: pathname === '/knowledgebase',
+      badge: null
     },
     {
       name: 'Scheduler',
@@ -414,8 +413,8 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                 <Layers className="w-4 h-4" />
                 <span>Bulk Create</span>
               </Link>
-              
-              {/* --- HELP BUTTON (Request 1) --- */}
+
+              {/* --- HELP BUTTON --- */}
               <div className="relative">
                 <button
                   ref={helpButtonRef}
@@ -424,7 +423,6 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                 >
                   <HelpCircle className="h-5 w-5" />
                 </button>
-                {/* Help Dropdown Panel */}
                 {helpOpen && (
                   <div
                     ref={helpPanelRef}
@@ -456,7 +454,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                       <div className="border-t border-gray-200 dark:border-gray-700 my-1"></div>
                       {isEnterprise ? (
                          <a
-                          href="tel:+18005550199" // Placeholder number
+                          href="tel:+18005550199"
                           className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50"
                         >
                           <Phone className="w-4 h-4" />
@@ -491,9 +489,9 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                   )}
                 </button>
                 <div ref={notificationPanelRef}>
-                  <NotificationDropdown 
-                    isOpen={notificationOpen} 
-                    onClose={() => setNotificationOpen(false)} 
+                  <NotificationDropdown
+                    isOpen={notificationOpen}
+                    onClose={() => setNotificationOpen(false)}
                   />
                 </div>
               </div>
@@ -543,12 +541,10 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
         </footer>
       </div>
 
-
-      {/* Debug info in development - Collapsible */}
+      {/* Debug info in development */}
       {process.env.NODE_ENV === 'development' && (
         <div className="fixed bottom-4 right-4 z-50">
           {debugCollapsed ? (
-            // Minimized version - just an icon
             <button
               onClick={() => setDebugCollapsed(false)}
               className="bg-black bg-opacity-90 text-green-400 p-3 rounded-lg shadow-xl hover:bg-opacity-100 transition-all"
@@ -557,7 +553,6 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
               <ChevronUp className="w-5 h-5" />
             </button>
           ) : (
-            // Expanded version - full debug info
             <div className="bg-black bg-opacity-90 text-white p-3 rounded-lg text-xs max-w-xs shadow-xl">
               <div className="flex items-center justify-between mb-2">
                 <div className="font-bold text-green-400">🔧 Debug User Data:</div>

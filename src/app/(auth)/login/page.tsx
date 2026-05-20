@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { Eye, EyeOff, Mail, Lock, AlertCircle } from 'lucide-react';
 import { z } from 'zod';
 import { useAuth } from '@/context/AuthProvider';
+import { authAPI } from '@/lib/api';
 
 // Form validation schema
 const loginSchema = z.object({
@@ -28,10 +29,11 @@ export default function LoginPage() {
   });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [notVerified, setNotVerified] = useState(false);
   const [passwordStrength, setPasswordStrength] = useState<null | number>(null);
   const [hasRedirected, setHasRedirected] = useState(false);
 
-  // 🚀 ENHANCED: Smart redirect logic with admin detection
+  // Smart redirect logic with admin detection
   useEffect(() => {
     if (isAuthenticated && !authLoading && !hasRedirected) {
       console.log('🔄 User authenticated, determining redirect...', {
@@ -41,23 +43,18 @@ export default function LoginPage() {
       
       setHasRedirected(true);
       
-      // Get redirect from URL params or determine based on user role
       const redirectParam = searchParams?.get('redirect');
       let redirectPath: string;
       
       if (redirectParam) {
-        // If there's a specific redirect requested, use it
         redirectPath = redirectParam;
         console.log('📍 Using redirect parameter:', redirectPath);
       } else {
-        // Otherwise, use role-based default route
         redirectPath = getDefaultRoute();
         console.log('🎯 Using role-based route:', redirectPath);
       }
       
       console.log('🚀 Redirecting to:', redirectPath);
-      
-      // Use replace to prevent back button issues
       router.replace(redirectPath);
     }
   }, [isAuthenticated, authLoading, hasRedirected, isAdmin, getDefaultRoute, router, searchParams]);
@@ -68,7 +65,6 @@ export default function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Prevent duplicate login attempts
     if (isAuthenticated || hasRedirected || isLoading) {
       console.log('⚠️ Login already in progress or user authenticated');
       return;
@@ -76,22 +72,19 @@ export default function LoginPage() {
 
     setIsLoading(true);
     setError('');
+    setNotVerified(false);
 
     try {
       console.log('🔑 Attempting login with:', formData.email);
       
-      // Validate form data using Zod
       loginSchema.parse(formData);
-      
-      // Use AuthProvider's login method
       await login(formData.email, formData.password, formData.rememberMe);
       
       console.log('✅ Login successful, authentication state will trigger redirect');
       
-      // Don't manually redirect here - let useEffect handle it based on role
-      
     } catch (err: any) {
       console.error('❌ Login failed:', err);
+
       if (err instanceof z.ZodError) {
         setError(err.errors[0].message);
       } else if (err.code === 'NETWORK_ERROR' || err.message?.includes('Network Error') || err.message?.includes('connect ECONNREFUSED')) {
@@ -100,14 +93,22 @@ export default function LoginPage() {
         setError('Too many login attempts. Please wait a few minutes before trying again.');
       } else if (err.response?.status === 500) {
         setError('Server error. Our team has been notified. Please try again later.');
+      } else if (
+        (err.response?.status === 401 && err.response?.data?.message?.toLowerCase().includes('not verified')) ||
+        err.message?.toLowerCase().includes('not verified')
+      ) {
+        setNotVerified(true);
+        setError(err.response?.data?.message || err.message);
       } else if (err.response?.status === 401) {
+        setNotVerified(false);
         setError('Invalid email or password. Please check your credentials.');
       } else {
+        setNotVerified(false);
         setError(err.message || 'Login failed. Please check your credentials.');
       }
-      setIsLoading(false); // Only reset loading on error
+
+      setIsLoading(false);
     }
-    // Don't reset loading on success - let redirect handle it
   };
 
   /**
@@ -120,24 +121,35 @@ export default function LoginPage() {
       [name]: type === 'checkbox' ? checked : value
     }));
 
-    // Calculate password strength when password changes
     if (name === 'password') {
       setPasswordStrength(Math.min(Math.floor(value.length / 2), 5));
     }
     
-    // Clear errors when user starts typing
     if (error) setError('');
+    if (notVerified) setNotVerified(false);
   };
 
   /**
-   * Handles social login (mock implementation)
+   * Handles resending the verification email
+   */
+  const handleResendVerification = async () => {
+    try {
+      await authAPI.post('/auth/resend-verification', { email: formData.email });
+      setError('');
+      setNotVerified(false);
+      router.push(`/auth/verify-email?email=${encodeURIComponent(formData.email)}`);
+    } catch (e: any) {
+      setError(e.response?.data?.message || 'Failed to resend verification email. Please try again.');
+    }
+  };
+
+  /**
+   * Handles social login
    */
   const handleSocialLogin = async (provider: 'twitter') => {
-    // This is now only for non-Google providers
     try {
       setIsLoading(true);
       setError('');
-      
       await new Promise(resolve => setTimeout(resolve, 1000));
       setError(`${provider} login is not implemented yet`);
     } catch (err: any) {
@@ -147,10 +159,8 @@ export default function LoginPage() {
     }
   };
 
-  // 🚀 ENHANCED: Better loading state detection
   const isFormLoading = isLoading || authLoading || hasRedirected;
 
-  // 🚀 ENHANCED: Show appropriate loading messages
   if (isAuthenticated && (authLoading || hasRedirected)) {
     const redirectType = isAdmin ? 'admin panel' : 'dashboard';
     return (
@@ -164,7 +174,6 @@ export default function LoginPage() {
     );
   }
 
-  // Don't render form if already authenticated
   if (isAuthenticated && !authLoading) {
     return (
       <div className="w-full max-w-md mx-auto text-center">
@@ -180,7 +189,6 @@ export default function LoginPage() {
         <h2 className="text-3xl font-bold text-gray-900 mb-2">Welcome back</h2>
         <p className="text-gray-600">Sign in to your ContentAI Pro account</p>
         
-        {/* 🚀 ENHANCED: Better development helper */}
         <div className="mt-4 p-3 bg-blue-50 rounded-md text-sm text-blue-700">
           <strong>Test Credentials:</strong><br />
           <div className="mt-2 space-y-1">
@@ -199,6 +207,15 @@ export default function LoginPage() {
           <div className="flex-1">
             <h3 className="text-sm font-medium text-red-800">Error</h3>
             <div className="mt-1 text-sm text-red-700">{error}</div>
+            {notVerified && (
+              <button
+                type="button"
+                onClick={handleResendVerification}
+                className="mt-3 inline-flex items-center text-sm font-medium text-red-800 underline hover:text-red-600"
+              >
+                Resend verification email
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -397,7 +414,6 @@ export default function LoginPage() {
         </Link>
       </p>
 
-      {/* 🚀 ENHANCED Debug info */}
       {process.env.NODE_ENV === 'development' && (
         <div className="mt-4 p-2 bg-gray-100 rounded text-xs space-y-1">
           <div>Auth Loading: {authLoading ? 'Yes' : 'No'}</div>
@@ -405,6 +421,7 @@ export default function LoginPage() {
           <div>Is Admin: {isAdmin ? 'Yes' : 'No'}</div>
           <div>Form Loading: {isLoading ? 'Yes' : 'No'}</div>
           <div>Has Redirected: {hasRedirected ? 'Yes' : 'No'}</div>
+          <div>Not Verified: {notVerified ? 'Yes' : 'No'}</div>
           <div>Default Route: {isAuthenticated ? getDefaultRoute() : 'N/A'}</div>
         </div>
       )}

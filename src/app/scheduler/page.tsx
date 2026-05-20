@@ -3,16 +3,16 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/context/AuthProvider';
-import { schedulerAPI, sitesAPI, contentAPI } from '@/lib/api';
+import { schedulerAPI, sitesAPI } from '@/lib/api';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import ScheduleModal from '@/components/scheduler/ScheduleModal';
-import type { ScheduledPost, SchedulerStats, WordPressSite, ContentItem } from '@/types';
+import BulkScheduleModal from '@/components/scheduler/BulkScheduleModal';
+import type { ScheduledPost, SchedulerStats, WordPressSite } from '@/types';
 import {
   Calendar,
   Clock,
   Plus,
   RefreshCw,
-  Filter,
   Search,
   ChevronLeft,
   ChevronRight,
@@ -22,7 +22,6 @@ import {
   Loader2,
   Eye,
   Edit3,
-  Trash2,
   PlayCircle,
   X,
   Globe,
@@ -58,6 +57,7 @@ export default function SchedulerPage() {
   });
   const [currentDate, setCurrentDate] = useState(new Date());
   const [showScheduleModal, setShowScheduleModal] = useState(false);
+  const [showBulkScheduleModal, setShowBulkScheduleModal] = useState(false);
   const [selectedPost, setSelectedPost] = useState<ScheduledPost | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
@@ -70,13 +70,11 @@ export default function SchedulerPage() {
       setLoading(true);
       setError(null);
 
-      // Load sites
       const sitesResponse = await sitesAPI.getUserSites();
       if (sitesResponse.data.success) {
         setSites(sitesResponse.data.data || []);
       }
 
-      // Load scheduled posts for current month
       const startDate = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
       const endDate = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
 
@@ -91,14 +89,12 @@ export default function SchedulerPage() {
         setScheduledPosts(postsResponse.data.data || []);
       }
 
-      // Load stats
       const statsResponse = await schedulerAPI.getStats(
         filters.siteId !== 'all' ? filters.siteId : undefined
       );
       if (statsResponse.data.success) {
         setStats(statsResponse.data.data);
       }
-
     } catch (err: any) {
       console.error('Error loading scheduler data:', err);
       setError(err.response?.data?.message || 'Failed to load scheduler data');
@@ -107,34 +103,24 @@ export default function SchedulerPage() {
     }
   };
 
-  const handlePreviousMonth = () => {
+  const handlePreviousMonth = () =>
     setCurrentDate(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
-  };
 
-  const handleNextMonth = () => {
+  const handleNextMonth = () =>
     setCurrentDate(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
-  };
 
-  const handleToday = () => {
-    setCurrentDate(new Date());
-  };
+  const handleToday = () => setCurrentDate(new Date());
 
   const handleCancelSchedule = async (scheduleId: string) => {
-    if (!confirm('Are you sure you want to cancel this scheduled post?')) {
-      return;
-    }
-
+    if (!confirm('Are you sure you want to cancel this scheduled post?')) return;
     try {
       setActionLoading(scheduleId);
-
       const response = await schedulerAPI.cancelSchedule(scheduleId);
-
       if (response.data.success) {
         await loadData();
         alert('Schedule cancelled successfully');
       }
     } catch (err: any) {
-      console.error('Error cancelling schedule:', err);
       alert(err.response?.data?.message || 'Failed to cancel schedule');
     } finally {
       setActionLoading(null);
@@ -142,27 +128,22 @@ export default function SchedulerPage() {
   };
 
   const handlePublishNow = async (scheduleId: string) => {
-    if (!confirm('Publish this post immediately?')) {
-      return;
-    }
-
+    if (!confirm('Publish this post immediately?')) return;
     try {
       setActionLoading(scheduleId);
-
       const response = await schedulerAPI.publishNow(scheduleId);
-
       if (response.data.success) {
         await loadData();
         alert('Post published successfully!');
       }
     } catch (err: any) {
-      console.error('Error publishing:', err);
       alert(err.response?.data?.message || 'Failed to publish post');
     } finally {
       setActionLoading(null);
     }
   };
 
+  // Calendar item clicks → edit existing schedule only
   const handleEditSchedule = (post: ScheduledPost) => {
     setSelectedPost(post);
     setShowScheduleModal(true);
@@ -174,113 +155,80 @@ export default function SchedulerPage() {
     loadData();
   };
 
+  const handleBulkScheduleSuccess = () => {
+    setShowBulkScheduleModal(false);
+    loadData();
+  };
+
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case 'published':
-        return <CheckCircle className="w-4 h-4 text-green-600" />;
-      case 'pending':
-        return <Clock className="w-4 h-4 text-yellow-600" />;
-      case 'failed':
-        return <XCircle className="w-4 h-4 text-red-600" />;
-      case 'cancelled':
-        return <AlertCircle className="w-4 h-4 text-gray-600" />;
-      default:
-        return <AlertCircle className="w-4 h-4 text-gray-600" />;
+      case 'published': return <CheckCircle className="w-4 h-4 text-green-600" />;
+      case 'pending':   return <Clock className="w-4 h-4 text-yellow-600" />;
+      case 'failed':    return <XCircle className="w-4 h-4 text-red-600" />;
+      default:          return <AlertCircle className="w-4 h-4 text-gray-600" />;
     }
   };
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'published':
-        return 'text-green-700 bg-green-50 border-green-200 dark:text-green-400 dark:bg-green-900/20 dark:border-green-800';
-      case 'pending':
-        return 'text-yellow-700 bg-yellow-50 border-yellow-200 dark:text-yellow-400 dark:bg-yellow-900/20 dark:border-yellow-800';
-      case 'failed':
-        return 'text-red-700 bg-red-50 border-red-200 dark:text-red-400 dark:bg-red-900/20 dark:border-red-800';
-      case 'cancelled':
-        return 'text-gray-700 bg-gray-50 border-gray-200 dark:text-gray-400 dark:bg-gray-900/20 dark:border-gray-800';
-      default:
-        return 'text-gray-700 bg-gray-50 border-gray-200 dark:text-gray-400 dark:bg-gray-900/20 dark:border-gray-800';
+      case 'published': return 'text-green-700 bg-green-50 border-green-200 dark:text-green-400 dark:bg-green-900/20 dark:border-green-800';
+      case 'pending':   return 'text-yellow-700 bg-yellow-50 border-yellow-200 dark:text-yellow-400 dark:bg-yellow-900/20 dark:border-yellow-800';
+      case 'failed':    return 'text-red-700 bg-red-50 border-red-200 dark:text-red-400 dark:bg-red-900/20 dark:border-red-800';
+      default:          return 'text-gray-700 bg-gray-50 border-gray-200 dark:text-gray-400 dark:bg-gray-900/20 dark:border-gray-800';
     }
   };
 
   const generateCalendarDays = (): CalendarDay[] => {
     const year = currentDate.getFullYear();
     const month = currentDate.getMonth();
-    
     const firstDay = new Date(year, month, 1);
     const lastDay = new Date(year, month + 1, 0);
     const daysInMonth = lastDay.getDate();
     const startingDayOfWeek = firstDay.getDay();
-    
     const days: CalendarDay[] = [];
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    // Previous month days
     const prevMonthLastDay = new Date(year, month, 0).getDate();
     for (let i = startingDayOfWeek - 1; i >= 0; i--) {
       const date = new Date(year, month - 1, prevMonthLastDay - i);
-      days.push({
-        date,
-        posts: [],
-        isCurrentMonth: false,
-        isToday: false
-      });
+      days.push({ date, posts: [], isCurrentMonth: false, isToday: false });
     }
 
-    // Current month days
     for (let day = 1; day <= daysInMonth; day++) {
       const date = new Date(year, month, day);
       date.setHours(0, 0, 0, 0);
-      
       const postsForDay = scheduledPosts.filter(post => {
         const postDate = new Date(post.scheduledFor);
         postDate.setHours(0, 0, 0, 0);
         return postDate.getTime() === date.getTime();
       });
-
-      days.push({
-        date,
-        posts: postsForDay,
-        isCurrentMonth: true,
-        isToday: date.getTime() === today.getTime()
-      });
+      days.push({ date, posts: postsForDay, isCurrentMonth: true, isToday: date.getTime() === today.getTime() });
     }
 
-    // Next month days
-    const remainingDays = 42 - days.length; // 6 weeks * 7 days
+    const remainingDays = 42 - days.length;
     for (let day = 1; day <= remainingDays; day++) {
       const date = new Date(year, month + 1, day);
-      days.push({
-        date,
-        posts: [],
-        isCurrentMonth: false,
-        isToday: false
-      });
+      days.push({ date, posts: [], isCurrentMonth: false, isToday: false });
     }
 
     return days;
   };
 
   const filteredPosts = scheduledPosts.filter(post => {
-    const matchesSearch = post.content?.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         post.site?.name?.toLowerCase().includes(searchTerm.toLowerCase());
-    
+    const matchesSearch =
+      post.content?.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      post.site?.name?.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = filters.status === 'all' || post.status === filters.status;
     const matchesSite = filters.siteId === 'all' || post.siteId === filters.siteId;
-    
     return matchesSearch && matchesStatus && matchesSite;
-  }).sort((a, b) => {
-    return new Date(a.scheduledFor).getTime() - new Date(b.scheduledFor).getTime();
-  });
+  }).sort((a, b) => new Date(a.scheduledFor).getTime() - new Date(b.scheduledFor).getTime());
 
   const monthNames = [
-    'January', 'February', 'March', 'April', 'May', 'June',
-    'July', 'August', 'September', 'October', 'November', 'December'
+    'January','February','March','April','May','June',
+    'July','August','September','October','November','December'
   ];
-
-  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
   if (loading) {
     return (
@@ -306,11 +254,9 @@ export default function SchedulerPage() {
               Schedule and manage your content publishing
             </p>
           </div>
+          {/* FIX: opens BulkScheduleModal instead of broken ScheduleModal new-schedule flow */}
           <button
-            onClick={() => {
-              setSelectedPost(null);
-              setShowScheduleModal(true);
-            }}
+            onClick={() => setShowBulkScheduleModal(true)}
             className="mt-4 sm:mt-0 inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
           >
             <Plus className="w-4 h-4 mr-2" />
@@ -318,7 +264,6 @@ export default function SchedulerPage() {
           </button>
         </div>
 
-        {/* Error Message */}
         {error && (
           <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4">
             <div className="flex items-center">
@@ -386,7 +331,6 @@ export default function SchedulerPage() {
                 className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
             </div>
-
             <div className="flex gap-2">
               <select
                 value={filters.siteId}
@@ -398,7 +342,6 @@ export default function SchedulerPage() {
                   <option key={site.id} value={site.id}>{site.name}</option>
                 ))}
               </select>
-
               <select
                 value={filters.status}
                 onChange={(e) => setFilters(prev => ({ ...prev, status: e.target.value as FilterOptions['status'] }))}
@@ -410,7 +353,6 @@ export default function SchedulerPage() {
                 <option value="failed">Failed</option>
                 <option value="cancelled">Cancelled</option>
               </select>
-
               <div className="flex border border-gray-300 dark:border-gray-600 rounded-lg overflow-hidden">
                 <button
                   onClick={() => setFilters(prev => ({ ...prev, view: 'calendar' }))}
@@ -440,47 +382,30 @@ export default function SchedulerPage() {
         {/* Calendar View */}
         {filters.view === 'calendar' && (
           <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-            {/* Calendar Header */}
             <div className="p-6 border-b border-gray-200 dark:border-gray-700">
               <div className="flex items-center justify-between">
                 <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
                   {monthNames[currentDate.getMonth()]} {currentDate.getFullYear()}
                 </h2>
                 <div className="flex items-center space-x-2">
-                  <button
-                    onClick={handlePreviousMonth}
-                    className="p-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                  >
+                  <button onClick={handlePreviousMonth} className="p-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors">
                     <ChevronLeft className="w-5 h-5" />
                   </button>
-                  <button
-                    onClick={handleToday}
-                    className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors"
-                  >
+                  <button onClick={handleToday} className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors">
                     Today
                   </button>
-                  <button
-                    onClick={handleNextMonth}
-                    className="p-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                  >
+                  <button onClick={handleNextMonth} className="p-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors">
                     <ChevronRight className="w-5 h-5" />
                   </button>
                 </div>
               </div>
             </div>
-
-            {/* Calendar Grid */}
             <div className="p-6">
-              {/* Day Names */}
               <div className="grid grid-cols-7 gap-2 mb-2">
                 {dayNames.map(day => (
-                  <div key={day} className="text-center text-sm font-medium text-gray-600 dark:text-gray-400 py-2">
-                    {day}
-                  </div>
+                  <div key={day} className="text-center text-sm font-medium text-gray-600 dark:text-gray-400 py-2">{day}</div>
                 ))}
               </div>
-
-              {/* Calendar Days */}
               <div className="grid grid-cols-7 gap-2">
                 {generateCalendarDays().map((day, index) => (
                   <div
@@ -489,31 +414,22 @@ export default function SchedulerPage() {
                       day.isCurrentMonth
                         ? 'bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600'
                         : 'bg-gray-50 dark:bg-gray-800 border-gray-100 dark:border-gray-700'
-                    } ${
-                      day.isToday
-                        ? 'ring-2 ring-blue-500'
-                        : ''
-                    }`}
+                    } ${day.isToday ? 'ring-2 ring-blue-500' : ''}`}
                   >
                     <div className={`text-sm font-medium mb-2 ${
                       day.isCurrentMonth
-                        ? day.isToday
-                          ? 'text-blue-600 dark:text-blue-400'
-                          : 'text-gray-900 dark:text-white'
+                        ? day.isToday ? 'text-blue-600 dark:text-blue-400' : 'text-gray-900 dark:text-white'
                         : 'text-gray-400 dark:text-gray-600'
                     }`}>
                       {day.date.getDate()}
                     </div>
-                    
                     {day.posts.length > 0 && (
                       <div className="space-y-1">
                         {day.posts.slice(0, 2).map(post => (
                           <button
                             key={post.id}
                             onClick={() => handleEditSchedule(post)}
-                            className={`w-full text-left px-2 py-1 rounded text-xs truncate ${
-                              getStatusColor(post.status)
-                            } hover:opacity-80 transition-opacity`}
+                            className={`w-full text-left px-2 py-1 rounded text-xs truncate ${getStatusColor(post.status)} hover:opacity-80 transition-opacity`}
                           >
                             {post.content?.title || 'Untitled'}
                           </button>
@@ -538,16 +454,14 @@ export default function SchedulerPage() {
             {filteredPosts.length === 0 ? (
               <div className="p-12 text-center">
                 <Calendar className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
-                  No scheduled posts
-                </h3>
+                <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">No scheduled posts</h3>
                 <p className="text-gray-600 dark:text-gray-400 mb-6">
                   {searchTerm || filters.status !== 'all'
                     ? 'Try adjusting your filters or search terms.'
                     : 'Start scheduling posts to see them here.'}
                 </p>
                 <button
-                  onClick={() => setShowScheduleModal(true)}
+                  onClick={() => setShowBulkScheduleModal(true)}
                   className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
                 >
                   <Plus className="w-4 h-4 mr-2" />
@@ -559,38 +473,26 @@ export default function SchedulerPage() {
                 <table className="w-full">
                   <thead className="bg-gray-50 dark:bg-gray-700">
                     <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        Post
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        Site
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        Scheduled For
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        Status
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        Actions
-                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Post</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Site</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Scheduled For</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
                     {filteredPosts.map((post) => (
                       <tr key={post.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
                         <td className="px-6 py-4">
-                          <div className="flex items-start space-x-3">
-                            <div className="flex-1 min-w-0">
-                              <p className="font-medium text-gray-900 dark:text-white">
-                                {post.content?.title || 'Untitled Post'}
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-gray-900 dark:text-white">
+                              {post.content?.title || 'Untitled Post'}
+                            </p>
+                            {post.content?.excerpt && (
+                              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1 line-clamp-2">
+                                {post.content.excerpt}
                               </p>
-                              {post.content?.excerpt && (
-                                <p className="text-sm text-gray-600 dark:text-gray-400 mt-1 line-clamp-2">
-                                  {post.content.excerpt}
-                                </p>
-                              )}
-                            </div>
+                            )}
                           </div>
                         </td>
                         <td className="px-6 py-4">
@@ -603,17 +505,10 @@ export default function SchedulerPage() {
                         </td>
                         <td className="px-6 py-4">
                           <div className="text-sm text-gray-900 dark:text-white">
-                            {new Date(post.scheduledFor).toLocaleDateString('en-US', {
-                              month: 'short',
-                              day: 'numeric',
-                              year: 'numeric'
-                            })}
+                            {new Date(post.scheduledFor).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                           </div>
                           <div className="text-xs text-gray-500 dark:text-gray-400">
-                            {new Date(post.scheduledFor).toLocaleTimeString('en-US', {
-                              hour: '2-digit',
-                              minute: '2-digit'
-                            })}
+                            {new Date(post.scheduledFor).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
                           </div>
                         </td>
                         <td className="px-6 py-4">
@@ -632,11 +527,9 @@ export default function SchedulerPage() {
                                   className="p-2 text-gray-400 hover:text-green-600 transition-colors disabled:opacity-50 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
                                   title="Publish Now"
                                 >
-                                  {actionLoading === post.id ? (
-                                    <Loader2 className="w-4 h-4 animate-spin" />
-                                  ) : (
-                                    <PlayCircle className="w-4 h-4" />
-                                  )}
+                                  {actionLoading === post.id
+                                    ? <Loader2 className="w-4 h-4 animate-spin" />
+                                    : <PlayCircle className="w-4 h-4" />}
                                 </button>
                                 <button
                                   onClick={() => handleEditSchedule(post)}
@@ -664,7 +557,7 @@ export default function SchedulerPage() {
                                 <Eye className="w-4 h-4" />
                               </Link>
                             )}
-                            </div>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -676,8 +569,17 @@ export default function SchedulerPage() {
         )}
       </div>
 
-      {/* Schedule Modal */}
-      {showScheduleModal && (
+      {/* BulkScheduleModal — for creating new schedules from the "Schedule Post" button */}
+      {showBulkScheduleModal && (
+        <BulkScheduleModal
+          isOpen={showBulkScheduleModal}
+          onClose={() => setShowBulkScheduleModal(false)}
+          onSuccess={handleBulkScheduleSuccess}
+        />
+      )}
+
+      {/* ScheduleModal — only for editing an existing schedule (calendar item click) */}
+      {showScheduleModal && selectedPost && (
         <ScheduleModal
           isOpen={showScheduleModal}
           onClose={() => {

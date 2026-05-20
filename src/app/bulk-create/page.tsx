@@ -1,10 +1,9 @@
-// frontend/src/app/bulk-create/page.tsx - COMPLETE BULK CREATION PAGE
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { useAuth } from '@/context/AuthProvider';
-import { bulkContentAPI, sitesAPI } from '@/lib/api';
+import { bulkContentAPI, sitesAPI, knowledgebaseAPI } from '@/lib/api';
 import {
   Plus,
   Trash2,
@@ -17,13 +16,22 @@ import {
   Zap,
   Globe,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Upload,
+  FileSpreadsheet,
+  BookOpen,
+  XCircle
 } from 'lucide-react';
+import { KnowledgeDoc, CSVParseResult } from '@/types';
 
+// Extend the entry to support knowledgebase docs and instructions
 interface BulkEntry {
   keyword: string;
   scheduledDate: string;
   customPrompt: string;
+  docIds?: string[];
+  dos?: string;
+  donts?: string;
 }
 
 interface Site {
@@ -33,40 +41,61 @@ interface Site {
   isActive: boolean;
 }
 
+type InputMode = 'manual' | 'csv';
+
 export default function BulkCreatePage() {
   const router = useRouter();
   const { user } = useAuth();
-  
-  const [entries, setEntries] = useState<BulkEntry[]>([
-    { keyword: '', scheduledDate: '', customPrompt: '' }
-  ]);
+
+  // ---------- Common state ----------
   const [selectedSite, setSelectedSite] = useState('');
   const [selectedModel, setSelectedModel] = useState<'groq' | 'gemini' | 'claude'>('groq');
   const [wordCount, setWordCount] = useState(1500);
   const [tone, setTone] = useState('professional');
   const [includeInternalLinks, setIncludeInternalLinks] = useState(true);
   const [showAdvanced, setShowAdvanced] = useState(false);
-  
+
   const [availableSites, setAvailableSites] = useState<Site[]>([]);
-  const [loading, setLoading] = useState(false);
   const [loadingSites, setLoadingSites] = useState(true);
   const [results, setResults] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [estimatedCredits, setEstimatedCredits] = useState(0);
+  const [loading, setLoading] = useState(false);
+
+  // ---------- Knowledgebase docs ----------
+  const [knowledgeDocs, setKnowledgeDocs] = useState<KnowledgeDoc[]>([]);
+  const [loadingDocs, setLoadingDocs] = useState(false);
+  const [expandedEntries, setExpandedEntries] = useState<Set<number>>(new Set());
+
+  // ---------- Input mode (manual / csv) ----------
+  const [inputMode, setInputMode] = useState<InputMode>('manual');
+
+  // ---------- Manual entries ----------
+  const [entries, setEntries] = useState<BulkEntry[]>([
+    { keyword: '', scheduledDate: '', customPrompt: '' }
+  ]);
+
+  // ---------- CSV state ----------
+  const [csvFile, setCsvFile] = useState<File | null>(null);
+  const [csvParsed, setCsvParsed] = useState<CSVParseResult | null>(null);
+  const [csvUploading, setCsvUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const MODEL_CONFIG = {
     groq: { label: 'Fast (1x)', multiplier: 1, icon: '⚡' },
     gemini: { label: 'Balanced (2x)', multiplier: 2, icon: '⭐' },
-    claude: { label: 'Premium (5x)', multiplier: 5, icon: '💎' }
+    claude: { label: 'Premium (5x)', multiplier: 5, icon: '🧠' }
   };
 
+  // ---------- Effects ----------
   useEffect(() => {
     loadSites();
+    loadKnowledgeDocs();
   }, []);
 
   useEffect(() => {
     calculateEstimate();
-  }, [entries, wordCount, selectedModel]);
+  }, [entries, wordCount, selectedModel, inputMode, csvParsed]);
 
   const loadSites = async () => {
     try {
@@ -86,13 +115,30 @@ export default function BulkCreatePage() {
     }
   };
 
+  const loadKnowledgeDocs = async () => {
+    try {
+      setLoadingDocs(true);
+      const response = await knowledgebaseAPI.getDocuments();
+      if (response.data.success) {
+        setKnowledgeDocs(response.data.data || []);
+      }
+    } catch (error) {
+      console.error('Error loading knowledge docs:', error);
+    } finally {
+      setLoadingDocs(false);
+    }
+  };
+
   const calculateEstimate = () => {
-    const validEntries = entries.filter(e => e.keyword.trim());
+    const validEntries = (inputMode === 'manual' ? entries : csvParsed?.rows || []).filter(
+      (e: any) => e.keyword?.trim()
+    );
     const multiplier = MODEL_CONFIG[selectedModel].multiplier;
     const total = Math.ceil(wordCount * multiplier * validEntries.length);
     setEstimatedCredits(total);
   };
 
+  // ---------- Manual entry handlers ----------
   const addEntry = () => {
     if (entries.length >= 20) {
       setError('Maximum 20 articles per batch');
@@ -106,60 +152,166 @@ export default function BulkCreatePage() {
     setEntries(entries.filter((_, i) => i !== index));
   };
 
-  const updateEntry = (index: number, field: keyof BulkEntry, value: string) => {
+  const updateEntry = (index: number, field: keyof BulkEntry, value: any) => {
     const newEntries = [...entries];
-    newEntries[index][field] = value;
+    if (field === 'docIds' && Array.isArray(value)) {
+      newEntries[index].docIds = value;
+    } else if (typeof value === 'string') {
+      (newEntries[index] as any)[field] = value;
+    }
     setEntries(newEntries);
   };
 
+  const toggleEntryExpanded = (index: number) => {
+    setExpandedEntries(prev => {
+      const next = new Set(prev);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  };
+
+  // ---------- CSV handlers ----------
+  const handleCsvFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 2 * 1024 * 1024) {
+        setError('CSV file must be under 2MB');
+        return;
+      }
+      setCsvFile(file);
+      setError(null);
+      setCsvParsed(null); // reset previous parse
+    }
+  };
+
+  const uploadCsvForPreview = async () => {
+    if (!csvFile) return;
+    try {
+      setCsvUploading(true);
+      setError(null);
+      const formData = new FormData();
+      formData.append('csv', csvFile);
+      const response = await bulkContentAPI.uploadCSV(formData);
+      if (response.data.success) {
+        setCsvParsed(response.data.data);
+        if (response.data.data.errors?.length) {
+          setError(`CSV parse warnings: ${response.data.data.errors.join('; ')}`);
+        }
+      } else {
+        throw new Error(response.data.message || 'Failed to parse CSV');
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.message || err.message || 'CSV upload failed');
+    } finally {
+      setCsvUploading(false);
+    }
+  };
+
+  const clearCsv = () => {
+    setCsvFile(null);
+    setCsvParsed(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  // ---------- Common submission ----------
   const handleBulkGenerate = async () => {
     try {
       setError(null);
       setResults(null);
-      
-      const validEntries = entries.filter(e => e.keyword.trim());
-      
-      if (validEntries.length === 0) {
-        setError('Please add at least one keyword');
-        return;
-      }
 
       if (!selectedSite) {
         setError('Please select a WordPress site');
         return;
       }
 
-      if ((user?.wordCredits || 0) < estimatedCredits) {
-        setError(`Insufficient credits. Need ${estimatedCredits.toLocaleString()} but only have ${(user?.wordCredits || 0).toLocaleString()}`);
+      let entriesToSubmit: any[] = [];
+
+      if (inputMode === 'manual') {
+        const validEntries = entries.filter(e => e.keyword.trim());
+        if (validEntries.length === 0) {
+          setError('Please add at least one keyword');
+          return;
+        }
+        entriesToSubmit = validEntries.map(e => ({
+          keyword: e.keyword,
+          scheduledDate: e.scheduledDate || undefined,
+          customPrompt: e.customPrompt || undefined,
+          docIds: e.docIds?.length ? e.docIds : undefined,
+          dos: e.dos || undefined,
+          donts: e.donts || undefined,
+        }));
+      } else {
+        if (!csvParsed || csvParsed.rows.length === 0) {
+          setError('No parsed CSV data. Upload and parse a CSV file first.');
+          return;
+        }
+        entriesToSubmit = csvParsed.rows.map(row => ({
+          topic: row.topic,
+          keyword: row.keyword,
+          scheduledDate: row.publish_date || undefined,
+          docIds: row.doc_ids ? row.doc_ids.split('|').map(id => id.trim()).filter(Boolean) : undefined,
+          dos: row.dos || undefined,
+          donts: row.donts || undefined,
+          customPrompt: undefined,
+          additionalContext: undefined,
+        }));
+      }
+
+      const userCredits = user?.wordCredits || 0;
+      if (userCredits < estimatedCredits) {
+        setError(`Insufficient credits. Need ${estimatedCredits.toLocaleString()} but only have ${userCredits.toLocaleString()}`);
         return;
       }
 
       setLoading(true);
 
-      const response = await bulkContentAPI.generateAndSchedule({
-        entries: validEntries.map(e => ({
-          keyword: e.keyword,
-          scheduledDate: e.scheduledDate || undefined,
-          customPrompt: e.customPrompt || undefined
-        })),
-        options: {
-          siteId: selectedSite,
-          model: selectedModel,
-          wordCount,
-          tone,
-          targetAudience: 'general audience',
-          includeIntroduction: true,
-          includeConclusion: true,
-          includeExamples: true,
-          includeStatistics: true,
-          includeInternalLinks,
-          maxInternalLinks: 5,
-          internalLinkDensity: 3,
-          contentIntent: 'informational',
-          writingStyle: 'conversational',
-          seoFocus: 'balanced'
-        }
-      });
+      // For CSV mode we call executeCSV, for manual we call generateAndSchedule
+      let response;
+      if (inputMode === 'csv') {
+        response = await bulkContentAPI.executeCSV({
+          rows: entriesToSubmit,
+          options: {
+            siteId: selectedSite,
+            model: selectedModel,
+            wordCount,
+            tone,
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            includeIntroduction: true,
+            includeConclusion: true,
+            includeExamples: true,
+            includeStatistics: true,
+            includeInternalLinks,
+            maxInternalLinks: 5,
+            internalLinkDensity: 3,
+            contentIntent: 'informational',
+            writingStyle: 'conversational',
+            seoFocus: 'balanced',
+          },
+        });
+      } else {
+        response = await bulkContentAPI.generateAndSchedule({
+          entries: entriesToSubmit,
+          options: {
+            siteId: selectedSite,
+            model: selectedModel,
+            wordCount,
+            tone,
+            targetAudience: 'general audience',
+            includeIntroduction: true,
+            includeConclusion: true,
+            includeExamples: true,
+            includeStatistics: true,
+            includeInternalLinks,
+            maxInternalLinks: 5,
+            internalLinkDensity: 3,
+            contentIntent: 'informational',
+            writingStyle: 'conversational',
+            seoFocus: 'balanced',
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          },
+        });
+      }
 
       if (response.data.success) {
         setResults(response.data.data);
@@ -174,7 +326,10 @@ export default function BulkCreatePage() {
     }
   };
 
-  const validEntriesCount = entries.filter(e => e.keyword.trim()).length;
+  // ---------- Render helpers ----------
+  const validEntriesCount = inputMode === 'manual'
+    ? entries.filter(e => e.keyword.trim()).length
+    : csvParsed?.totalRows || 0;
 
   return (
     <DashboardLayout>
@@ -185,7 +340,7 @@ export default function BulkCreatePage() {
             Bulk Article Generation
           </h1>
           <p className="text-gray-600 dark:text-gray-400 mt-1">
-            Generate multiple articles at once with custom prompts and scheduling
+            Generate multiple articles at once with knowledgebase integration, custom prompts, and scheduling
           </p>
         </div>
 
@@ -238,10 +393,10 @@ export default function BulkCreatePage() {
           </div>
         )}
 
-        {/* Main Settings */}
+        {/* Main Settings (shared) */}
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6 space-y-6">
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Generation Settings</h3>
-          
+
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {/* Site Selection */}
             <div>
@@ -309,7 +464,7 @@ export default function BulkCreatePage() {
               {showAdvanced ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
               Advanced Settings
             </button>
-            
+
             {showAdvanced && (
               <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
@@ -327,7 +482,6 @@ export default function BulkCreatePage() {
                     <option value="authoritative">Authoritative</option>
                   </select>
                 </div>
-
                 <div className="flex items-center">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
@@ -346,93 +500,291 @@ export default function BulkCreatePage() {
           </div>
         </div>
 
-        {/* Article Entries */}
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-              Articles to Generate ({validEntriesCount}/20)
-            </h3>
-            <button
-              onClick={addEntry}
-              disabled={entries.length >= 20}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 text-sm"
-            >
-              <Plus className="w-4 h-4" />
-              Add Article
-            </button>
-          </div>
+        {/* ---- INPUT MODE TABS ---- */}
+        <div className="flex border-b border-gray-200 dark:border-gray-700">
+          <button
+            onClick={() => { setInputMode('manual'); setError(null); }}
+            className={`px-4 py-2 font-medium text-sm border-b-2 transition-colors ${
+              inputMode === 'manual'
+                ? 'border-blue-600 text-blue-600 dark:text-blue-400'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            Manual Entry
+          </button>
+          <button
+            onClick={() => { setInputMode('csv'); setError(null); }}
+            className={`px-4 py-2 font-medium text-sm border-b-2 transition-colors ${
+              inputMode === 'csv'
+                ? 'border-blue-600 text-blue-600 dark:text-blue-400'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            <FileSpreadsheet className="w-4 h-4 inline mr-1" />
+            CSV Upload
+          </button>
+        </div>
 
-          <div className="space-y-4">
-            {entries.map((entry, index) => (
-              <div key={index} className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg space-y-3">
-                <div className="flex items-start gap-3">
-                  <div className="flex-1 space-y-3">
-                    {/* Keyword */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                        Keyword/Topic *
-                      </label>
-                      <input
-                        type="text"
-                        value={entry.keyword}
-                        onChange={(e) => updateEntry(index, 'keyword', e.target.value)}
-                        placeholder="Enter keyword or topic..."
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
-                      />
-                    </div>
+        {/* ---- MANUAL ENTRY PANEL ---- */}
+        {inputMode === 'manual' && (
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                Articles to Generate ({validEntriesCount}/20)
+              </h3>
+              <button
+                onClick={addEntry}
+                disabled={entries.length >= 20}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 text-sm"
+              >
+                <Plus className="w-4 h-4" />
+                Add Article
+              </button>
+            </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      {/* Schedule Date */}
+            <div className="space-y-4">
+              {entries.map((entry, index) => (
+                <div key={index} className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg space-y-3">
+                  <div className="flex items-start gap-3">
+                    <div className="flex-1 space-y-3">
+                      {/* Keyword */}
                       <div>
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                          <Calendar className="w-4 h-4 inline mr-1" />
-                          Schedule (Optional)
-                        </label>
-                        <input
-                          type="datetime-local"
-                          value={entry.scheduledDate}
-                          onChange={(e) => updateEntry(index, 'scheduledDate', e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
-                        />
-                      </div>
-
-                      {/* Custom Prompt */}
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                          Custom Prompt (Optional)
+                          Keyword/Topic *
                         </label>
                         <input
                           type="text"
-                          value={entry.customPrompt}
-                          onChange={(e) => updateEntry(index, 'customPrompt', e.target.value)}
-                          placeholder="Special instructions..."
+                          value={entry.keyword}
+                          onChange={(e) => updateEntry(index, 'keyword', e.target.value)}
+                          placeholder="Enter keyword or topic..."
                           className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
                         />
                       </div>
-                    </div>
-                  </div>
 
-                  {/* Remove Button */}
-                  {entries.length > 1 && (
-                    <button
-                      onClick={() => removeEntry(index)}
-                      className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                      title="Remove article"
-                    >
-                      <Trash2 className="w-5 h-5" />
-                    </button>
-                  )}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            <Calendar className="w-4 h-4 inline mr-1" />
+                            Schedule (Optional)
+                          </label>
+                          <input
+                            type="datetime-local"
+                            value={entry.scheduledDate}
+                            onChange={(e) => updateEntry(index, 'scheduledDate', e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            Custom Prompt (Optional)
+                          </label>
+                          <input
+                            type="text"
+                            value={entry.customPrompt}
+                            onChange={(e) => updateEntry(index, 'customPrompt', e.target.value)}
+                            placeholder="Special instructions..."
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Expand/Collapse advanced per-entry */}
+                      <button
+                        type="button"
+                        onClick={() => toggleEntryExpanded(index)}
+                        className="text-sm text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
+                      >
+                        {expandedEntries.has(index) ? (
+                          <><ChevronUp className="w-4 h-4" /> Hide Advanced</>
+                        ) : (
+                          <><ChevronDown className="w-4 h-4" /> Show Advanced</>
+                        )}
+                      </button>
+
+                      {expandedEntries.has(index) && (
+                        <div className="space-y-3 pl-2 border-l-2 border-blue-200 dark:border-blue-800">
+                          {/* Knowledgebase doc selector */}
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                              <BookOpen className="w-4 h-4 inline mr-1" />
+                              Source Documents
+                            </label>
+                            {knowledgeDocs.length === 0 ? (
+                              <p className="text-xs text-gray-500">No knowledgebase documents available.</p>
+                            ) : (
+                              <div className="max-h-32 overflow-y-auto border border-gray-300 dark:border-gray-600 rounded-lg p-2 bg-white dark:bg-gray-700">
+                                {knowledgeDocs.map(doc => (
+                                  <label key={doc.id} className="flex items-center gap-2 py-1 text-sm">
+                                    <input
+                                      type="checkbox"
+                                      checked={entry.docIds?.includes(doc.id) || false}
+                                      onChange={(e) => {
+                                        const current = entry.docIds || [];
+                                        const updated = e.target.checked
+                                          ? [...current, doc.id]
+                                          : current.filter(id => id !== doc.id);
+                                        updateEntry(index, 'docIds', updated);
+                                      }}
+                                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                    />
+                                    <span className="text-gray-800 dark:text-gray-200">{doc.title}</span>
+                                    <span className={`ml-auto text-xs px-2 py-0.5 rounded-full ${
+                                      doc.status === 'ready' ? 'bg-green-100 text-green-700' :
+                                      doc.status === 'processing' ? 'bg-yellow-100 text-yellow-700' :
+                                      'bg-red-100 text-red-700'
+                                    }`}>{doc.status}</span>
+                                  </label>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Do's */}
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                              Do's (Optional instructions)
+                            </label>
+                            <input
+                              type="text"
+                              value={entry.dos || ''}
+                              onChange={(e) => updateEntry(index, 'dos', e.target.value)}
+                              placeholder="Things the AI should include..."
+                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                            />
+                          </div>
+
+                          {/* Don'ts */}
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                              Don'ts (Things to avoid)
+                            </label>
+                            <input
+                              type="text"
+                              value={entry.donts || ''}
+                              onChange={(e) => updateEntry(index, 'donts', e.target.value)}
+                              placeholder="What the AI should NOT do..."
+                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Remove Button */}
+                    {entries.length > 1 && (
+                      <button
+                        onClick={() => removeEntry(index)}
+                        className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                        title="Remove article"
+                      >
+                        <Trash2 className="w-5 h-5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ---- CSV UPLOAD PANEL ---- */}
+        {inputMode === 'csv' && (
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6 space-y-4">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+              Upload CSV Content Calendar
+            </h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              CSV columns: <code className="bg-gray-100 dark:bg-gray-700 px-1 rounded">topic, keyword, tags, publish_date, doc_ids, dos, donts</code>.
+              Only <strong>topic</strong> and <strong>keyword</strong> are required.
+            </p>
+
+            <div className="flex items-center gap-4">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".csv"
+                onChange={handleCsvFileChange}
+                className="text-sm text-gray-700 dark:text-gray-300 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 dark:file:bg-blue-900/30 dark:file:text-blue-300"
+              />
+              <button
+                onClick={uploadCsvForPreview}
+                disabled={!csvFile || csvUploading}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 text-sm"
+              >
+                {csvUploading ? (
+                  <><Loader2 className="w-4 h-4 animate-spin" /> Parsing...</>
+                ) : (
+                  <><Upload className="w-4 h-4" /> Parse CSV</>
+                )}
+              </button>
+              {csvFile && (
+                <button onClick={clearCsv} className="text-red-600 hover:text-red-700 text-sm flex items-center gap-1">
+                  <XCircle className="w-4 h-4" /> Clear
+                </button>
+              )}
+            </div>
+
+            {/* CSV Preview Table */}
+            {csvParsed && (
+              <div className="mt-4">
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="font-medium text-gray-900 dark:text-white">
+                    Preview ({csvParsed.totalRows} rows) • Est. credits: {csvParsed.estimatedCredits}
+                  </h4>
+                </div>
+                <div className="overflow-x-auto border border-gray-200 dark:border-gray-700 rounded-lg">
+                  <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700 text-sm">
+                    <thead className="bg-gray-50 dark:bg-gray-800">
+                      <tr>
+                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Topic</th>
+                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Keyword</th>
+                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Tags</th>
+                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Publish Date</th>
+                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Docs</th>
+                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Do's / Don'ts</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200 dark:divide-gray-700 bg-white dark:bg-gray-800">
+                      {csvParsed.rows.slice(0, 50).map((row, idx) => (
+                        <tr key={idx}>
+                          <td className="px-3 py-2 whitespace-nowrap text-gray-800 dark:text-gray-200">{row.topic}</td>
+                          <td className="px-3 py-2 whitespace-nowrap text-gray-800 dark:text-gray-200">{row.keyword}</td>
+                          <td className="px-3 py-2 whitespace-nowrap text-gray-500">{row.tags || '-'}</td>
+                          <td className="px-3 py-2 whitespace-nowrap text-gray-500">{row.publish_date || '-'}</td>
+                          <td className="px-3 py-2 whitespace-nowrap text-gray-500">{row.doc_ids || '-'}</td>
+                          <td className="px-3 py-2 whitespace-nowrap text-gray-500">
+                            {row.dos && <span className="text-green-600">Do</span>}
+                            {row.donts && (row.dos ? ' / ' : '') + ''}
+                            {row.donts && <span className="text-red-600">Don't</span>}
+                            {!row.dos && !row.donts && '-'}
+                          </td>
+                        </tr>
+                      ))}
+                      {csvParsed.rows.length > 50 && (
+                        <tr>
+                          <td colSpan={6} className="px-3 py-2 text-center text-gray-500">
+                            ...and {csvParsed.rows.length - 50} more rows
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
                 </div>
               </div>
-            ))}
+            )}
           </div>
-        </div>
+        )}
 
-        {/* Generate Button */}
+        {/* Generate Button (visible in both modes) */}
         <div className="flex justify-center">
           <button
             onClick={handleBulkGenerate}
-            disabled={loading || validEntriesCount === 0 || !selectedSite || (user?.wordCredits || 0) < estimatedCredits}
+            disabled={
+              loading ||
+              (inputMode === 'manual' ? validEntriesCount === 0 : !csvParsed || csvParsed.totalRows === 0) ||
+              !selectedSite ||
+              (user?.wordCredits || 0) < estimatedCredits
+            }
             className="px-8 py-4 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg hover:from-blue-700 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-3 font-semibold text-lg shadow-lg hover:shadow-xl transition-all"
           >
             {loading ? (
@@ -449,7 +801,7 @@ export default function BulkCreatePage() {
           </button>
         </div>
 
-        {/* Results Display */}
+        {/* Results Display (unchanged from original) */}
         {results && (
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6 space-y-6">
             <h3 className="text-xl font-bold text-gray-900 dark:text-white">
@@ -530,6 +882,7 @@ export default function BulkCreatePage() {
                 onClick={() => {
                   setResults(null);
                   setEntries([{ keyword: '', scheduledDate: '', customPrompt: '' }]);
+                  clearCsv();
                 }}
                 className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700"
               >

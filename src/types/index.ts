@@ -467,3 +467,37 @@ export interface Notification {
   actionUrl?: string;
   actionText?: string;
 }
+
+// ---------- NEW KNOWLEDGEBASE & CSV TYPES ----------
+export interface KnowledgeDoc {
+  id: string;
+  userId: string;
+  title: string;
+  description?: string;
+  fileName: string;
+  fileType: 'docx' | 'txt';
+  fileSize: number;
+  status: 'processing' | 'ready' | 'failed';
+  processingError?: string;
+  totalChunks: number;
+  totalWords: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CSVRow {
+  topic: string;
+  keyword: string;
+  tags?: string;
+  publish_date?: string;
+  doc_ids?: string;
+  dos?: string;
+  donts?: string;
+}
+
+export interface CSVParseResult {
+  rows: CSVRow[];
+  totalRows: number;
+  estimatedCredits: number;
+  errors: string[];
+}
