@@ -24,7 +24,6 @@ import {
 } from 'lucide-react';
 import { KnowledgeDoc, CSVParseResult } from '@/types';
 
-// Extend the entry to support knowledgebase docs and instructions
 interface BulkEntry {
   keyword: string;
   scheduledDate: string;
@@ -51,9 +50,25 @@ export default function BulkCreatePage() {
   const [selectedSite, setSelectedSite] = useState('');
   const [selectedModel, setSelectedModel] = useState<'groq' | 'gemini' | 'claude'>('groq');
   const [wordCount, setWordCount] = useState(1500);
-  const [tone, setTone] = useState('professional');
+  const [tone, setTone] = useState<'professional' | 'casual' | 'friendly' | 'authoritative'>('professional');
   const [includeInternalLinks, setIncludeInternalLinks] = useState(true);
   const [showAdvanced, setShowAdvanced] = useState(false);
+
+  // --- New advanced settings ---
+  const [writingStyle, setWritingStyle] = useState<'conversational' | 'academic' | 'journalistic' | 'technical' | 'creative'>('conversational');
+  const [contentIntent, setContentIntent] = useState<'informational' | 'navigational' | 'commercial' | 'transactional'>('informational');
+  const [seoFocus, setSeoFocus] = useState<'primary_keyword' | 'semantic_keywords' | 'long_tail' | 'balanced'>('balanced');
+  const [callToAction, setCallToAction] = useState('');
+  const [includeIntro, setIncludeIntro] = useState(true);
+  const [includeConclusion, setIncludeConclusion] = useState(true);
+  const [includeFAQ, setIncludeFAQ] = useState(false);
+  const [includeStatistics, setIncludeStatistics] = useState(true);
+  const [includeExamples, setIncludeExamples] = useState(true);
+  const [includeComparisons, setIncludeComparisons] = useState(false);
+  const [targetKeywordDensity, setTargetKeywordDensity] = useState(1.5);
+  const [internalLinkDensity, setInternalLinkDensity] = useState(3);
+  const [maxInternalLinks, setMaxInternalLinks] = useState(5);
+  // --- end new advanced settings ---
 
   const [availableSites, setAvailableSites] = useState<Site[]>([]);
   const [loadingSites, setLoadingSites] = useState(true);
@@ -181,7 +196,7 @@ export default function BulkCreatePage() {
       }
       setCsvFile(file);
       setError(null);
-      setCsvParsed(null); // reset previous parse
+      setCsvParsed(null);
     }
   };
 
@@ -266,50 +281,40 @@ export default function BulkCreatePage() {
 
       setLoading(true);
 
-      // For CSV mode we call executeCSV, for manual we call generateAndSchedule
+      // Build the options object with all new settings
+      const options = {
+        siteId: selectedSite,
+        model: selectedModel,
+        wordCount,
+        tone,
+        targetAudience: 'general audience',
+        includeIntroduction: includeIntro,
+        includeConclusion,
+        includeFAQ,
+        includeExamples,
+        includeStatistics,
+        includeComparisons,
+        includeInternalLinks,
+        maxInternalLinks,
+        internalLinkDensity,
+        contentIntent,
+        writingStyle,
+        seoFocus,
+        callToAction,
+        targetKeywordDensity,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      };
+
       let response;
       if (inputMode === 'csv') {
         response = await bulkContentAPI.executeCSV({
           rows: entriesToSubmit,
-          options: {
-            siteId: selectedSite,
-            model: selectedModel,
-            wordCount,
-            tone,
-            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-            includeIntroduction: true,
-            includeConclusion: true,
-            includeExamples: true,
-            includeStatistics: true,
-            includeInternalLinks,
-            maxInternalLinks: 5,
-            internalLinkDensity: 3,
-            contentIntent: 'informational',
-            writingStyle: 'conversational',
-            seoFocus: 'balanced',
-          },
+          options,
         });
       } else {
         response = await bulkContentAPI.generateAndSchedule({
           entries: entriesToSubmit,
-          options: {
-            siteId: selectedSite,
-            model: selectedModel,
-            wordCount,
-            tone,
-            targetAudience: 'general audience',
-            includeIntroduction: true,
-            includeConclusion: true,
-            includeExamples: true,
-            includeStatistics: true,
-            includeInternalLinks,
-            maxInternalLinks: 5,
-            internalLinkDensity: 3,
-            contentIntent: 'informational',
-            writingStyle: 'conversational',
-            seoFocus: 'balanced',
-            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-          },
+          options,
         });
       }
 
@@ -326,7 +331,6 @@ export default function BulkCreatePage() {
     }
   };
 
-  // ---------- Render helpers ----------
   const validEntriesCount = inputMode === 'manual'
     ? entries.filter(e => e.keyword.trim()).length
     : csvParsed?.totalRows || 0;
@@ -398,7 +402,6 @@ export default function BulkCreatePage() {
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Generation Settings</h3>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {/* Site Selection */}
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                 WordPress Site *
@@ -420,7 +423,6 @@ export default function BulkCreatePage() {
               )}
             </div>
 
-            {/* Model Selection */}
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                 AI Model
@@ -438,7 +440,6 @@ export default function BulkCreatePage() {
               </select>
             </div>
 
-            {/* Word Count */}
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                 Word Count
@@ -455,7 +456,7 @@ export default function BulkCreatePage() {
             </div>
           </div>
 
-          {/* Advanced Settings */}
+          {/* Advanced Settings (now fully expanded with all options) */}
           <div>
             <button
               onClick={() => setShowAdvanced(!showAdvanced)}
@@ -468,33 +469,102 @@ export default function BulkCreatePage() {
             {showAdvanced && (
               <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Tone
-                  </label>
-                  <select
-                    value={tone}
-                    onChange={(e) => setTone(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                  >
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Tone</label>
+                  <select value={tone} onChange={(e) => setTone(e.target.value as 'professional' | 'casual' | 'friendly' | 'authoritative')} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
                     <option value="professional">Professional</option>
                     <option value="casual">Casual</option>
                     <option value="friendly">Friendly</option>
                     <option value="authoritative">Authoritative</option>
                   </select>
                 </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Writing Style</label>
+                  <select value={writingStyle} onChange={(e) => setWritingStyle(e.target.value as 'conversational' | 'academic' | 'journalistic' | 'technical' | 'creative')} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                    <option value="conversational">Conversational</option>
+                    <option value="academic">Academic</option>
+                    <option value="journalistic">Journalistic</option>
+                    <option value="technical">Technical</option>
+                    <option value="creative">Creative</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Content Intent</label>
+                  <select value={contentIntent} onChange={(e) => setContentIntent(e.target.value as 'informational' | 'navigational' | 'commercial' | 'transactional')} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                    <option value="informational">Informational</option>
+                    <option value="navigational">Navigational</option>
+                    <option value="commercial">Commercial</option>
+                    <option value="transactional">Transactional</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">SEO Focus</label>
+                  <select value={seoFocus} onChange={(e) => setSeoFocus(e.target.value as 'primary_keyword' | 'semantic_keywords' | 'long_tail' | 'balanced')} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                    <option value="balanced">Balanced SEO</option>
+                    <option value="primary_keyword">Primary Keyword Focus</option>
+                    <option value="semantic_keywords">Semantic Keywords</option>
+                    <option value="long_tail">Long-tail Keywords</option>
+                  </select>
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Call to Action (Optional)</label>
+                  <input type="text" value={callToAction} onChange={(e) => setCallToAction(e.target.value)} placeholder="e.g., Contact us for a free consultation" className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+                </div>
+
+                {/* Content feature checkboxes */}
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Content Features</label>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                    <label className="flex items-center gap-2">
+                      <input type="checkbox" checked={includeIntro} onChange={(e) => setIncludeIntro(e.target.checked)} className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                      <span className="text-sm text-gray-700 dark:text-gray-300">Introduction</span>
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input type="checkbox" checked={includeConclusion} onChange={(e) => setIncludeConclusion(e.target.checked)} className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                      <span className="text-sm text-gray-700 dark:text-gray-300">Conclusion</span>
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input type="checkbox" checked={includeFAQ} onChange={(e) => setIncludeFAQ(e.target.checked)} className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                      <span className="text-sm text-gray-700 dark:text-gray-300">FAQ Section</span>
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input type="checkbox" checked={includeStatistics} onChange={(e) => setIncludeStatistics(e.target.checked)} className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                      <span className="text-sm text-gray-700 dark:text-gray-300">Statistics</span>
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input type="checkbox" checked={includeExamples} onChange={(e) => setIncludeExamples(e.target.checked)} className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                      <span className="text-sm text-gray-700 dark:text-gray-300">Examples</span>
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input type="checkbox" checked={includeComparisons} onChange={(e) => setIncludeComparisons(e.target.checked)} className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                      <span className="text-sm text-gray-700 dark:text-gray-300">Comparisons</span>
+                    </label>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Target Keyword Density (%)</label>
+                  <input type="number" value={targetKeywordDensity} onChange={(e) => setTargetKeywordDensity(parseFloat(e.target.value) || 1.5)} min="0.5" max="5" step="0.1" className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+                </div>
+
                 <div className="flex items-center">
                   <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={includeInternalLinks}
-                      onChange={(e) => setIncludeInternalLinks(e.target.checked)}
-                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                    />
-                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Include Internal Links
-                    </span>
+                    <input type="checkbox" checked={includeInternalLinks} onChange={(e) => setIncludeInternalLinks(e.target.checked)} className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Include Internal Links</span>
                   </label>
                 </div>
+
+                {includeInternalLinks && (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Link Density (per 1000 words)</label>
+                      <input type="number" value={internalLinkDensity} onChange={(e) => setInternalLinkDensity(parseInt(e.target.value) || 3)} min="1" max="10" className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Maximum Links</label>
+                      <input type="number" value={maxInternalLinks} onChange={(e) => setMaxInternalLinks(parseInt(e.target.value) || 5)} min="1" max="20" className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+                    </div>
+                  </>
+                )}
               </div>
             )}
           </div>
@@ -525,7 +595,7 @@ export default function BulkCreatePage() {
           </button>
         </div>
 
-        {/* ---- MANUAL ENTRY PANEL ---- */}
+        {/* ---- MANUAL ENTRY PANEL (unchanged except for internal link fields removed, already handled globally) ---- */}
         {inputMode === 'manual' && (
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6 space-y-4">
             <div className="flex items-center justify-between">
@@ -547,7 +617,6 @@ export default function BulkCreatePage() {
                 <div key={index} className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg space-y-3">
                   <div className="flex items-start gap-3">
                     <div className="flex-1 space-y-3">
-                      {/* Keyword */}
                       <div>
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                           Keyword/Topic *
@@ -588,7 +657,6 @@ export default function BulkCreatePage() {
                         </div>
                       </div>
 
-                      {/* Expand/Collapse advanced per-entry */}
                       <button
                         type="button"
                         onClick={() => toggleEntryExpanded(index)}
@@ -603,7 +671,6 @@ export default function BulkCreatePage() {
 
                       {expandedEntries.has(index) && (
                         <div className="space-y-3 pl-2 border-l-2 border-blue-200 dark:border-blue-800">
-                          {/* Knowledgebase doc selector */}
                           <div>
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                               <BookOpen className="w-4 h-4 inline mr-1" />
@@ -639,7 +706,6 @@ export default function BulkCreatePage() {
                             )}
                           </div>
 
-                          {/* Do's */}
                           <div>
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                               Do's (Optional instructions)
@@ -653,7 +719,6 @@ export default function BulkCreatePage() {
                             />
                           </div>
 
-                          {/* Don'ts */}
                           <div>
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                               Don'ts (Things to avoid)
@@ -670,7 +735,6 @@ export default function BulkCreatePage() {
                       )}
                     </div>
 
-                    {/* Remove Button */}
                     {entries.length > 1 && (
                       <button
                         onClick={() => removeEntry(index)}
@@ -687,7 +751,7 @@ export default function BulkCreatePage() {
           </div>
         )}
 
-        {/* ---- CSV UPLOAD PANEL ---- */}
+        {/* ---- CSV UPLOAD PANEL (unchanged) ---- */}
         {inputMode === 'csv' && (
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6 space-y-4">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
@@ -724,7 +788,6 @@ export default function BulkCreatePage() {
               )}
             </div>
 
-            {/* CSV Preview Table */}
             {csvParsed && (
               <div className="mt-4">
                 <div className="flex items-center justify-between mb-2">
@@ -775,7 +838,7 @@ export default function BulkCreatePage() {
           </div>
         )}
 
-        {/* Generate Button (visible in both modes) */}
+        {/* Generate Button */}
         <div className="flex justify-center">
           <button
             onClick={handleBulkGenerate}
@@ -801,7 +864,7 @@ export default function BulkCreatePage() {
           </button>
         </div>
 
-        {/* Results Display (unchanged from original) */}
+        {/* Results Display */}
         {results && (
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6 space-y-6">
             <h3 className="text-xl font-bold text-gray-900 dark:text-white">
