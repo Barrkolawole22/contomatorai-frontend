@@ -49,7 +49,7 @@ const ForgotPasswordForm: React.FC = () => {
                   <p>Check your email for a link to reset your password. If it doesn't appear within a few minutes, check your spam folder.</p>
                 </div>
                 <div className="mt-4">
-                  <Link href="/auth/login" className="text-sm font-medium text-indigo-600 hover:text-indigo-500">
+                  <Link href="/login" className="text-sm font-medium text-indigo-600 hover:text-indigo-500">
                     Back to sign in
                   </Link>
                 </div>
@@ -90,7 +90,7 @@ const ForgotPasswordForm: React.FC = () => {
             </div>
 
             <div className="text-center">
-              <Link href="/auth/login" className="font-medium text-indigo-600 hover:text-indigo-500">
+              <Link href="/login" className="font-medium text-indigo-600 hover:text-indigo-500">
                 Back to sign in
               </Link>
             </div>
