@@ -21,7 +21,6 @@ export default function ResetPasswordPage() {
   const [error, setError] = useState('');
   const [countdown, setCountdown] = useState(5);
 
-  // Redirect countdown after success
   useEffect(() => {
     if (status !== 'success') return;
     if (countdown === 0) {
@@ -32,7 +31,6 @@ export default function ResetPasswordPage() {
     return () => clearTimeout(timer);
   }, [status, countdown, router]);
 
-  // No token — show error immediately
   useEffect(() => {
     if (!token) {
       setStatus('error');
@@ -49,8 +47,8 @@ export default function ResetPasswordPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (formData.password.length < 6) {
-      setError('Password must be at least 6 characters.');
+    if (formData.password.length < 8) {
+      setError('Password must be at least 8 characters.');
       return;
     }
 
@@ -65,7 +63,8 @@ export default function ResetPasswordPage() {
     try {
       await authAPI.post('/auth/reset-password', {
         token,
-        newPassword: formData.password,
+        password: formData.password,
+        confirmPassword: formData.confirmPassword,
       });
       setStatus('success');
     } catch (err: any) {
@@ -78,7 +77,6 @@ export default function ResetPasswordPage() {
     }
   };
 
-  // ─── Success state ───────────────────────────────────────────────────────────
   if (status === 'success') {
     return (
       <div className="fixed inset-0 bg-white z-50 overflow-y-auto">
@@ -118,7 +116,6 @@ export default function ResetPasswordPage() {
     );
   }
 
-  // ─── Error state (bad/missing token) ─────────────────────────────────────────
   if (status === 'error' && !token) {
     return (
       <div className="fixed inset-0 bg-white z-50 overflow-y-auto">
@@ -162,7 +159,6 @@ export default function ResetPasswordPage() {
     );
   }
 
-  // ─── Form state (idle + loading + inline errors) ──────────────────────────────
   return (
     <div className="fixed inset-0 bg-white z-50 overflow-y-auto">
       <div className="w-full max-w-md mx-auto min-h-screen flex flex-col justify-center py-12 px-4">
@@ -174,7 +170,7 @@ export default function ResetPasswordPage() {
           </div>
           <h2 className="text-3xl font-bold text-gray-900 mb-2">Choose a new password</h2>
           <p className="text-gray-600">
-            Make sure it's at least 6 characters and something you'll remember.
+            Must be at least 8 characters with uppercase, lowercase, number and special character.
           </p>
         </div>
 
@@ -186,7 +182,6 @@ export default function ResetPasswordPage() {
         )}
 
         <form onSubmit={handleSubmit} className="space-y-6">
-          {/* New Password */}
           <div>
             <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
               New password
@@ -220,7 +215,6 @@ export default function ResetPasswordPage() {
             </div>
           </div>
 
-          {/* Confirm Password */}
           <div>
             <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-1">
               Confirm new password
