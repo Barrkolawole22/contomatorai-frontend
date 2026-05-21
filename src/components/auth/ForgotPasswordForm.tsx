@@ -14,7 +14,7 @@ const ForgotPasswordForm: React.FC = () => {
     setIsSubmitting(true);
 
     try {
-      await authAPI.post('/auth/reset-password', { email });
+      await authAPI.post('/auth/forgot-password', { email });
       setIsSuccess(true);
     } catch (err: any) {
       setError(err.response?.data?.message || 'An error occurred. Please try again later.');
@@ -27,11 +27,6 @@ const ForgotPasswordForm: React.FC = () => {
     <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full space-y-8">
         <div>
-          <img
-            className="mx-auto h-12 w-auto"
-            src="/logo.svg"
-            alt="Content Automation"
-          />
           <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
             Reset your password
           </h2>
