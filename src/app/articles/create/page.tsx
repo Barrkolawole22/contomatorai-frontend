@@ -423,6 +423,7 @@ export default function EnhancedCreateArticlePage() {
         includeFAQ: settings.includeFAQ,
         contentIntent: settings.contentIntent,
         customPrompt: settings.customPrompt,
+        selectedDocIds: settings.selectedDocIds,
         additionalContext: [
           knowledgeContext,
           settings.additionalContext
