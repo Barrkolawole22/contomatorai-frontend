@@ -64,6 +64,7 @@ export default function ResetPasswordPage() {
       await authAPI.post('/auth/reset-password', {
         token,
         password: formData.password,
+        newPassword: formData.password,
         confirmPassword: formData.confirmPassword,
       });
       setStatus('success');
