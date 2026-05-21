@@ -1,13 +1,12 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { useAuth } from '@/context/AuthProvider'
+import { authAPI } from '@/lib/api';
 
 const ForgotPasswordForm: React.FC = () => {
   const [email, setEmail] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [error, setError] = useState('');
-  const { resetPassword } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -15,7 +14,7 @@ const ForgotPasswordForm: React.FC = () => {
     setIsSubmitting(true);
 
     try {
-      await resetPassword(email);
+      await authAPI.post('/auth/reset-password', { email });
       setIsSuccess(true);
     } catch (err: any) {
       setError(err.response?.data?.message || 'An error occurred. Please try again later.');
