@@ -142,11 +142,13 @@ export default function SitemapPage() {
     
     setCrawlingInProgress(true);
     setCrawlSiteId(siteId);
-    setCrawlProgress({ status: 'Initializing crawl...', urlsFound: 0, currentUrl: '' });
+    setCrawlProgress({ status: 'Connecting to crawler...', urlsFound: 0, currentUrl: '' });
 
-    // Connect to the streaming backend endpoint (Server-Sent Events)
-    // Replace this URL string with your actual backend streaming route
-    const streamUrl = `${process.env.NEXT_PUBLIC_API_URL || ''}/api/sitemap/crawl/stream?siteId=${siteId}`;
+    // ✅ Get the token. In browser handlers, it's safe to use localStorage directly.
+    const token = localStorage.getItem('token') || '';
+
+    // ✅ Pass the token in the URL so the SSE request can authenticate
+    const streamUrl = `${process.env.NEXT_PUBLIC_API_URL || ''}/api/sitemap/crawl/stream?siteId=${siteId}&token=${token}`;
     const eventSource = new EventSource(streamUrl);
 
     eventSource.onmessage = (event) => {
@@ -181,7 +183,7 @@ export default function SitemapPage() {
       eventSource.close();
       setCrawlingInProgress(false);
       setCrawlSiteId(null);
-      alert('Connection lost during sitemap crawl. The server might still be working in the background.');
+      alert('Connection lost during sitemap crawl. Check the network tab or ensure your token is valid.');
     };
   };
 

@@ -145,7 +145,8 @@ export default function BillingPage() {
         await refreshUser();
         await loadAll();
         setSuccess(res.data.message || 'Payment successful!');
-        router.replace('/billing');
+        // FIXED: Redirect to the correct dashboard path
+        router.replace('/dashboard/billing');
       } else {
         setError(res.data?.message || 'Payment verification failed');
       }
@@ -182,12 +183,16 @@ export default function BillingPage() {
     }
   };
 
+  // FIXED: Fetch new prices instantly, save preference in background
   const handleCurrencyToggle = async (next: 'USD' | 'NGN') => {
     setCurrency(next);
+    await loadAll(next);
+    
     try {
       await billingAPI.updateCurrency(next);
-      await loadAll(next);
-    } catch { /* non-fatal */ }
+    } catch (error) { 
+      console.warn('Could not save currency preference to DB, but UI updated.'); 
+    }
   };
 
   const fmt = (n: number) => n.toLocaleString();
