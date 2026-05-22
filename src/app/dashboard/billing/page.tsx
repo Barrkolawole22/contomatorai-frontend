@@ -105,22 +105,23 @@ export default function BillingPage() {
     }
   }, [searchParams]);
 
-  const loadAll = async () => {
+  const loadAll = async (currencyOverride?: 'USD' | 'NGN') => {
     try {
       setLoading(true);
       setError(null);
 
+      const activeCurrency = currencyOverride || currency;
+
       const [pkgRes, infoRes, analyticsRes] = await Promise.all([
-        billingAPI.getWordPackages(),
+        billingAPI.getWordPackages(activeCurrency),
         billingAPI.getBillingInfo(),
         billingAPI.getUsageAnalytics('month'),
       ]);
 
       if (pkgRes.data?.success) {
-        const { subscriptionPlans, topupPackages, currency: serverCurrency } = pkgRes.data.data;
+        const { subscriptionPlans, topupPackages } = pkgRes.data.data;
         setPlans(subscriptionPlans || []);
         setTopups(topupPackages   || []);
-        setCurrency(serverCurrency || 'NGN');
       }
       if (infoRes.data?.success) {
         setBillingInfo(infoRes.data.data);
@@ -185,7 +186,7 @@ export default function BillingPage() {
     setCurrency(next);
     try {
       await billingAPI.updateCurrency(next);
-      await loadAll();
+      await loadAll(next);
     } catch { /* non-fatal */ }
   };
 

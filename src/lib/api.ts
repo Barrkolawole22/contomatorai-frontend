@@ -169,9 +169,9 @@ export const settingsAPI = {
 
 // ---------- BILLING API ----------
 export const billingAPI = {
-  /** Returns { subscriptionPlans, topupPackages, currency } */
-  getWordPackages: () =>
-    makeRequest({ method: 'GET', url: '/billing/packages' }),
+  /** Returns { subscriptionPlans, topupPackages, currency } filtered by the given currency */
+  getWordPackages: (currency?: 'USD' | 'NGN') =>
+    makeRequest({ method: 'GET', url: '/billing/packages', params: currency ? { currency } : {} }),
 
   getBillingInfo: () =>
     makeRequest({ method: 'GET', url: '/billing/info' }),
