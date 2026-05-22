@@ -175,6 +175,13 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
       badge: null
     },
     {
+      name: 'Pipeline',
+      href: '/pipeline',
+      icon: Zap,
+      current: pathname.startsWith('/pipeline'),
+      badge: { text: 'Pro', color: 'bg-purple-500' }
+    },
+    {
       name: 'Bulk Create',
       href: '/bulk-create',
       icon: Layers,

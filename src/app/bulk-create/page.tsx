@@ -48,7 +48,7 @@ export default function BulkCreatePage() {
 
   // ---------- Common state ----------
   const [selectedSite, setSelectedSite] = useState('');
-  const [selectedModel, setSelectedModel] = useState<'groq' | 'gemini' | 'claude'>('groq');
+ const [selectedModel, setSelectedModel] = useState<'gemini' | 'gemini-pro' | 'gpt4o' | 'claude'>('gemini');
   const [wordCount, setWordCount] = useState(1500);
   const [tone, setTone] = useState<'professional' | 'casual' | 'friendly' | 'authoritative'>('professional');
   const [includeInternalLinks, setIncludeInternalLinks] = useState(true);
@@ -97,9 +97,10 @@ export default function BulkCreatePage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const MODEL_CONFIG = {
-    groq: { label: 'Fast (1x)', multiplier: 1, icon: '⚡' },
-    gemini: { label: 'Balanced (2x)', multiplier: 2, icon: '⭐' },
-    claude: { label: 'Premium (5x)', multiplier: 5, icon: '🧠' }
+    gemini: { label: 'Fast (1x)', multiplier: 1, icon: '⚡' },
+    'gemini-pro': { label: 'Balanced (2x)', multiplier: 2, icon: '🌿' },
+    gpt4o: { label: 'Premium (3x)', multiplier: 3, icon: '🚀' },
+    claude: { label: 'Elite (5x)', multiplier: 5, icon: '🔮' }
   };
 
   // ---------- Effects ----------

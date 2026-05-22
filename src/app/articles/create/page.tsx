@@ -44,23 +44,29 @@ import {
   Link2
 } from 'lucide-react';
 
-// Model configuration with credit multipliers
+// New model configuration with updated models
 const MODEL_CONFIG: Record<string, { label: string; description: string; creditMultiplier: number; icon: string }> = {
-  groq: {
-    label: 'Fast Generation',
-    description: 'Quick and efficient content generation',
+  gemini: {
+    label: 'Fast',
+    description: 'Gemini 2.5 Flash – quick generation',
     creditMultiplier: 1,
     icon: '⚡'
   },
-  gemini: {
+  'gemini-pro': {
     label: 'Balanced',
-    description: 'Good quality with moderate speed',
+    description: 'Gemini 2.5 Pro + Google Search – researched content',
     creditMultiplier: 2,
-    icon: '⭐'
+    icon: '🌟'
+  },
+  gpt4o: {
+    label: 'Premium',
+    description: 'GPT-4o – high-quality nuanced content',
+    creditMultiplier: 3,
+    icon: '🧠'
   },
   claude: {
-    label: 'Premium Quality',
-    description: 'Highest quality and most detailed content',
+    label: 'Elite',
+    description: 'Claude 3.5 Sonnet – deepest analysis',
     creditMultiplier: 5,
     icon: '💎'
   }
@@ -106,6 +112,7 @@ interface EnhancedGenerationSettings {
   internalLinkDensity: number;
   maxInternalLinks: number;
   selectedDocIds: string[]; // knowledgebase docs
+  includeExternalLinks: boolean; // new toggle
 }
 
 interface GeneratedContent {
@@ -137,7 +144,8 @@ export default function EnhancedCreateArticlePage() {
   const [loadingStage, setLoadingStage] = useState('');
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [selectedModel, setSelectedModel] = useState<'groq' | 'gemini' | 'claude'>('groq');
+  // Updated selectedModel type
+  const [selectedModel, setSelectedModel] = useState<'gemini' | 'gemini-pro' | 'gpt4o' | 'claude'>('gemini');
   const [estimatedCredits, setEstimatedCredits] = useState(1500);
   const [internalLinkSuggestions, setInternalLinkSuggestions] = useState<InternalLinkSuggestion[]>([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
@@ -148,6 +156,12 @@ export default function EnhancedCreateArticlePage() {
   const [publishError, setPublishError] = useState<string | null>(null);
   const [linksLastUpdated, setLinksLastUpdated] = useState<Date | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  
+  // Scrape URL state
+  const [scrapeUrl, setScrapeUrl] = useState('');
+  const [scraping, setScraping] = useState(false);
+  const [scrapedText, setScrapedText] = useState('');
+  const [scrapeError, setScrapeError] = useState<string | null>(null);
   
   // Knowledgebase state
   const [knowledgeDocs, setKnowledgeDocs] = useState<KnowledgeDoc[]>([]);
@@ -174,7 +188,8 @@ export default function EnhancedCreateArticlePage() {
     includeInternalLinks: true,
     internalLinkDensity: 3,
     maxInternalLinks: 5,
-    selectedDocIds: []
+    selectedDocIds: [],
+    includeExternalLinks: false // new setting
   });
   
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
@@ -302,9 +317,9 @@ export default function EnhancedCreateArticlePage() {
 
     try {
       setLoadingSuggestions(true);
-      setShowInternalLinks(true); // ✅ Auto-expand on refresh
-      setError(null); // Clear any previous errors
-      setSuccessMessage(null); // Clear any previous success messages
+      setShowInternalLinks(true);
+      setError(null);
+      setSuccessMessage(null);
       
       const response = await sitemapAPI.getSuggestions(topic, selectedSite);
       
@@ -316,10 +331,9 @@ export default function EnhancedCreateArticlePage() {
         setInternalLinkSuggestions(links);
         setLinksLastUpdated(new Date());
         
-        // Show success message
         if (links.length > 0) {
           setSuccessMessage(`Successfully found ${links.length} relevant internal link${links.length !== 1 ? 's' : ''}`);
-          setTimeout(() => setSuccessMessage(null), 5000); // Clear after 5 seconds
+          setTimeout(() => setSuccessMessage(null), 5000);
         }
       } else {
         console.warn('⚠️ API returned success=false:', response.data);
@@ -336,6 +350,34 @@ export default function EnhancedCreateArticlePage() {
       setError(`Failed to load internal links: ${error.response?.data?.message || error.message}`);
     } finally {
       setLoadingSuggestions(false);
+    }
+  };
+
+  // Scrape handler
+  const handleScrape = async () => {
+    if (!scrapeUrl) return;
+    setScraping(true);
+    setScrapeError(null);
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/scraper/extract`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({ url: scrapeUrl })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setScrapedText(prev => prev + `\n\nFrom ${scrapeUrl}:\n${data.data.text}`);
+        setScrapeUrl('');
+      } else {
+        setScrapeError(data.message || 'Scrape failed');
+      }
+    } catch (err: any) {
+      setScrapeError(err.message);
+    } finally {
+      setScraping(false);
     }
   };
 
@@ -405,7 +447,7 @@ export default function EnhancedCreateArticlePage() {
     }, 8000);
     
     try {
-      // Build additionalContext from knowledgebase docs
+      // Build additionalContext from knowledgebase docs and scraped text
       let knowledgeContext = '';
       if (settings.selectedDocIds.length > 0) {
         const selectedDocs = knowledgeDocs.filter(doc => settings.selectedDocIds.includes(doc.id));
@@ -426,7 +468,8 @@ export default function EnhancedCreateArticlePage() {
         selectedDocIds: settings.selectedDocIds,
         additionalContext: [
           knowledgeContext,
-          settings.additionalContext
+          settings.additionalContext,
+          scrapedText  // Include scraped content
         ].filter(Boolean).join('\n\n'),
         writingStyle: settings.writingStyle,
         seoFocus: settings.seoFocus,
@@ -439,13 +482,15 @@ export default function EnhancedCreateArticlePage() {
         internalLinkDensity: settings.internalLinkDensity,
         maxInternalLinks: settings.maxInternalLinks,
         internalLinkSuggestions: settings.includeInternalLinks ? internalLinkSuggestions : undefined,
+        includeExternalLinks: settings.includeExternalLinks, // New toggle
         extraInstructions: [
           settings.extraInstructions,
           settings.customPrompt,
           settings.additionalContext,
           settings.includeInternalLinks && internalLinkSuggestions.length > 0
             ? `Include internal links to relevant pages from our site. Available links: ${internalLinkSuggestions.map(s => s.title).join(', ')}`
-            : ''
+            : '',
+          settings.includeExternalLinks ? 'Include relevant external links to authoritative sources.' : ''
         ].filter(Boolean).join('\n\n')
       };
       
@@ -882,7 +927,7 @@ export default function EnhancedCreateArticlePage() {
               </div>
             </div>
 
-            {/* Knowledgebase Document Selection (replaces file upload) */}
+            {/* Knowledgebase Document Selection */}
             <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
               <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
                 <BookOpen className="w-5 h-5" />
@@ -942,6 +987,37 @@ export default function EnhancedCreateArticlePage() {
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                     rows={3}
                   />
+                </div>
+
+                {/* Scrape URL section */}
+                <div className="border-t pt-4">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    <ExternalLink className="w-4 h-4 inline mr-1" />
+                    Scrape URL for Additional Context
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="url"
+                      value={scrapeUrl}
+                      onChange={(e) => setScrapeUrl(e.target.value)}
+                      placeholder="https://example.com/article"
+                      className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    />
+                    <button
+                      onClick={handleScrape}
+                      disabled={!scrapeUrl || scraping}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+                    >
+                      {scraping ? 'Extracting...' : 'Extract'}
+                    </button>
+                  </div>
+                  {scrapeError && <p className="text-sm text-red-600 mt-1">{scrapeError}</p>}
+                  {scrapedText && (
+                    <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                      Scraped {scrapedText.split(/\s+/).length} words. Appended to context.
+                      <button onClick={() => setScrapedText('')} className="ml-2 text-red-400 hover:underline">Clear</button>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -1068,6 +1144,16 @@ export default function EnhancedCreateArticlePage() {
                           <span className="text-sm text-gray-700 dark:text-gray-300">{label}</span>
                         </label>
                       ))}
+                      {/* New checkbox for external links */}
+                      <label className="flex items-center">
+                        <input
+                          type="checkbox"
+                          checked={settings.includeExternalLinks}
+                          onChange={(e) => setSettings(prev => ({ ...prev, includeExternalLinks: e.target.checked }))}
+                          className="mr-2 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="text-sm text-gray-700 dark:text-gray-300">Include External Links</span>
+                      </label>
                     </div>
                   </div>
 
@@ -1076,11 +1162,11 @@ export default function EnhancedCreateArticlePage() {
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
                       Generation Speed & Quality
                     </label>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                       {Object.entries(MODEL_CONFIG).map(([modelKey, modelConfig]) => (
                         <div
                           key={modelKey}
-                          onClick={() => setSelectedModel(modelKey as 'groq' | 'gemini' | 'claude')}
+                          onClick={() => setSelectedModel(modelKey as 'gemini' | 'gemini-pro' | 'gpt4o' | 'claude')}
                           className={`p-4 border-2 rounded-lg cursor-pointer transition-all ${
                             selectedModel === modelKey
                               ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 shadow-md'
