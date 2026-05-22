@@ -112,7 +112,7 @@ interface EnhancedGenerationSettings {
   internalLinkDensity: number;
   maxInternalLinks: number;
   selectedDocIds: string[]; // knowledgebase docs
-  includeExternalLinks: boolean; // new toggle
+  includeExternalLinks: boolean;
 }
 
 interface GeneratedContent {
@@ -144,7 +144,6 @@ export default function EnhancedCreateArticlePage() {
   const [loadingStage, setLoadingStage] = useState('');
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  // Updated selectedModel type
   const [selectedModel, setSelectedModel] = useState<'gemini' | 'gemini-pro' | 'gpt4o' | 'claude'>('gemini');
   const [estimatedCredits, setEstimatedCredits] = useState(1500);
   const [internalLinkSuggestions, setInternalLinkSuggestions] = useState<InternalLinkSuggestion[]>([]);
@@ -189,7 +188,7 @@ export default function EnhancedCreateArticlePage() {
     internalLinkDensity: 3,
     maxInternalLinks: 5,
     selectedDocIds: [],
-    includeExternalLinks: false // new setting
+    includeExternalLinks: false
   });
   
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
@@ -341,11 +340,6 @@ export default function EnhancedCreateArticlePage() {
       }
     } catch (error: any) {
       console.error('❌ Error loading internal link suggestions:', error);
-      console.error('Error details:', {
-        message: error.message,
-        response: error.response?.data,
-        status: error.response?.status
-      });
       setInternalLinkSuggestions([]);
       setError(`Failed to load internal links: ${error.response?.data?.message || error.message}`);
     } finally {
@@ -447,15 +441,10 @@ export default function EnhancedCreateArticlePage() {
     }, 8000);
     
     try {
-      // Build additionalContext from knowledgebase docs and scraped text
-      let knowledgeContext = '';
-      if (settings.selectedDocIds.length > 0) {
-        const selectedDocs = knowledgeDocs.filter(doc => settings.selectedDocIds.includes(doc.id));
-        knowledgeContext = selectedDocs
-          .map(doc => `---\nDocument: ${doc.title}\nContent:\n${doc.description || ''}`)
-          .join('\n\n');
-      }
-
+      // FIX: Do NOT build context from doc.description here.
+      // selectedDocIds are passed to the backend which performs proper
+      // vector RAG retrieval via knowledgebaseService.retrieveContext().
+      // Only merge user-typed context and scraped text as additionalContext.
       const enhancedOptions = {
         tone: settings.tone,
         wordCount: settings.wordCount,
@@ -467,10 +456,9 @@ export default function EnhancedCreateArticlePage() {
         customPrompt: settings.customPrompt,
         selectedDocIds: settings.selectedDocIds,
         additionalContext: [
-          knowledgeContext,
           settings.additionalContext,
-          scrapedText  // Include scraped content
-        ].filter(Boolean).join('\n\n'),
+          scrapedText
+        ].filter(Boolean).join('\n\n') || undefined,
         writingStyle: settings.writingStyle,
         seoFocus: settings.seoFocus,
         callToAction: settings.callToAction,
@@ -482,11 +470,10 @@ export default function EnhancedCreateArticlePage() {
         internalLinkDensity: settings.internalLinkDensity,
         maxInternalLinks: settings.maxInternalLinks,
         internalLinkSuggestions: settings.includeInternalLinks ? internalLinkSuggestions : undefined,
-        includeExternalLinks: settings.includeExternalLinks, // New toggle
+        includeExternalLinks: settings.includeExternalLinks,
         extraInstructions: [
           settings.extraInstructions,
           settings.customPrompt,
-          settings.additionalContext,
           settings.includeInternalLinks && internalLinkSuggestions.length > 0
             ? `Include internal links to relevant pages from our site. Available links: ${internalLinkSuggestions.map(s => s.title).join(', ')}`
             : '',
@@ -934,7 +921,7 @@ export default function EnhancedCreateArticlePage() {
                 Knowledgebase Context
               </h3>
               <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                Select documents from your knowledgebase to inject relevant context into the AI generation.
+                Select documents from your knowledgebase. The backend will retrieve the most relevant excerpts using semantic search.
               </p>
               {loadingKnowledgeDocs ? (
                 <div className="text-sm text-gray-500">Loading knowledgebase documents...</div>
@@ -1144,7 +1131,6 @@ export default function EnhancedCreateArticlePage() {
                           <span className="text-sm text-gray-700 dark:text-gray-300">{label}</span>
                         </label>
                       ))}
-                      {/* New checkbox for external links */}
                       <label className="flex items-center">
                         <input
                           type="checkbox"
@@ -1219,7 +1205,7 @@ export default function EnhancedCreateArticlePage() {
           </div>
         )}
 
-        {/* Step 2: Site Selection with Internal Links Configuration (unchanged) */}
+        {/* Step 2: Site Selection with Internal Links Configuration */}
         {step === 'site' && !loading && (
           <div className="space-y-6">
             <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
@@ -1349,7 +1335,7 @@ export default function EnhancedCreateArticlePage() {
               )}
             </div>
 
-            {/* Internal Links Configuration - Step 2 (unchanged, kept for reference) */}
+            {/* Internal Links Configuration */}
             {settings.includeInternalLinks && selectedSite && availableSites.length > 0 && (
               <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
                 <div className="flex items-center justify-between mb-4">
@@ -1416,7 +1402,6 @@ export default function EnhancedCreateArticlePage() {
                     </div>
                   </div>
 
-                  {/* Preview Available Links (kept as before) */}
                   <div>
                     <div className="flex items-center justify-between mb-3">
                       <button
@@ -1503,7 +1488,7 @@ export default function EnhancedCreateArticlePage() {
                                   No Indexed URLs Found
                                 </p>
                                 <p className="text-xs text-yellow-700 dark:text-yellow-300 mt-1">
-                                  This site hasn't been crawled yet. Run a sitemap crawl to enable internal link suggestions. The content will still be generated without internal links.
+                                  This site hasn't been crawled yet. Run a sitemap crawl to enable internal link suggestions.
                                 </p>
                                 <button
                                   onClick={() => router.push('/sitemap')}
@@ -1544,7 +1529,7 @@ export default function EnhancedCreateArticlePage() {
           </div>
         )}
 
-        {/* Step 3: Content Generation Results (unchanged) */}
+        {/* Step 3: Content Generation Results */}
         {step === 'generate' && generatedContent && !loading && (
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
             <div className="text-center">
