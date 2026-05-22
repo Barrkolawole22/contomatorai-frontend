@@ -18,7 +18,8 @@ import {
   XCircle,
   Link2,
   ExternalLink,
-  Upload
+  Upload,
+  Activity
 } from 'lucide-react';
 
 interface IndexedUrl {
@@ -51,6 +52,12 @@ interface FilterOptions {
   sortOrder: 'asc' | 'desc';
 }
 
+interface CrawlProgress {
+  status: string;
+  urlsFound: number;
+  currentUrl: string;
+}
+
 export default function SitemapPage() {
   const { user } = useAuth();
   const [indexedUrls, setIndexedUrls] = useState<IndexedUrl[]>([]);
@@ -67,10 +74,17 @@ export default function SitemapPage() {
   const [showFilters, setShowFilters] = useState(false);
   const [selectedUrls, setSelectedUrls] = useState<string[]>([]);
   const [showAddUrlModal, setShowAddUrlModal] = useState(false);
-  const [crawlingInProgress, setCrawlingInProgress] = useState(false);
-  const [crawlSiteId, setCrawlSiteId] = useState<string | null>(null);
   const [stats, setStats] = useState<any>(null);
   const [addUrlLoading, setAddUrlLoading] = useState(false);
+
+  // Real-time crawl state
+  const [crawlingInProgress, setCrawlingInProgress] = useState(false);
+  const [crawlSiteId, setCrawlSiteId] = useState<string | null>(null);
+  const [crawlProgress, setCrawlProgress] = useState<CrawlProgress>({
+    status: '',
+    urlsFound: 0,
+    currentUrl: ''
+  });
 
   const [newUrlData, setNewUrlData] = useState({
     url: '',
@@ -123,23 +137,52 @@ export default function SitemapPage() {
     }
   };
 
-  const handleCrawlSitemap = async (siteId: string) => {
+  const handleCrawlSitemap = (siteId: string) => {
     if (!confirm('Start crawling the sitemap? This might take a few minutes for large sites.')) return;
-    try {
-      setCrawlingInProgress(true);
-      setCrawlSiteId(siteId);
-      const response = await sitemapAPI.crawlSitemap(siteId);
-      if (response.data.success) {
-        alert(`Successfully crawled sitemap. ${response.data.data?.urlCount ?? ''} URLs indexed.`);
-        loadData();
+    
+    setCrawlingInProgress(true);
+    setCrawlSiteId(siteId);
+    setCrawlProgress({ status: 'Initializing crawl...', urlsFound: 0, currentUrl: '' });
+
+    // Connect to the streaming backend endpoint (Server-Sent Events)
+    // Replace this URL string with your actual backend streaming route
+    const streamUrl = `${process.env.NEXT_PUBLIC_API_URL || ''}/api/sitemap/crawl/stream?siteId=${siteId}`;
+    const eventSource = new EventSource(streamUrl);
+
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+
+        if (data.type === 'progress') {
+          setCrawlProgress({
+            status: 'Discovering URLs...',
+            urlsFound: data.urlsFound,
+            currentUrl: data.currentUrl
+          });
+        } 
+        else if (data.type === 'complete') {
+          eventSource.close();
+          setCrawlingInProgress(false);
+          setCrawlSiteId(null);
+          alert(`Successfully crawled sitemap. ${data.urlsFound} URLs indexed.`);
+          loadData();
+        } 
+        else if (data.type === 'error') {
+          eventSource.close();
+          throw new Error(data.message);
+        }
+      } catch (err) {
+        console.error('Error parsing SSE data:', err);
       }
-    } catch (err) {
-      console.error('Error crawling sitemap:', err);
-      alert('Failed to crawl sitemap');
-    } finally {
+    };
+
+    eventSource.onerror = (err) => {
+      console.error('EventSource connection error:', err);
+      eventSource.close();
       setCrawlingInProgress(false);
       setCrawlSiteId(null);
-    }
+      alert('Connection lost during sitemap crawl. The server might still be working in the background.');
+    };
   };
 
   const handleDeleteUrl = async (urlId: string) => {
@@ -186,7 +229,6 @@ export default function SitemapPage() {
     }
   };
 
-  // FIX: use sitemapAPI.addUrl instead of raw fetch
   const handleAddUrl = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newUrlData.url) { alert('URL is required'); return; }
@@ -321,6 +363,56 @@ export default function SitemapPage() {
             )}
           </div>
         </div>
+
+        {/* --- RICH DATA PROGRESS WIDGET --- */}
+        {crawlingInProgress && crawlSiteId === filters.siteId && (
+          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-6 shadow-sm mb-6 transition-all">
+            <div className="flex flex-col md:flex-row md:items-center justify-between mb-4 gap-4">
+              <div className="flex items-center space-x-4">
+                <div className="p-3 bg-blue-100 dark:bg-blue-800/50 rounded-lg shrink-0">
+                  <Activity className="w-6 h-6 text-blue-600 dark:text-blue-400 animate-pulse" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                    {crawlProgress.status} 
+                    <RefreshCw className="w-4 h-4 text-blue-500 animate-spin" />
+                  </h3>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    Scanning domain for active pages
+                  </p>
+                </div>
+              </div>
+              <div className="text-left md:text-right bg-white dark:bg-gray-800 py-2 px-4 rounded-lg border border-gray-100 dark:border-gray-700">
+                <span className="text-3xl font-bold text-blue-600 dark:text-blue-400">
+                  {crawlProgress.urlsFound}
+                </span>
+                <span className="text-sm text-gray-500 dark:text-gray-400 block uppercase tracking-wider font-semibold">
+                  URLs Discovered
+                </span>
+              </div>
+            </div>
+
+            {crawlProgress.currentUrl && (
+              <div className="mt-4 bg-white/60 dark:bg-gray-900/50 rounded-lg p-3 border border-blue-100 dark:border-blue-800/50 backdrop-blur-sm">
+                <p className="text-xs font-medium text-blue-500 dark:text-blue-400 uppercase tracking-wider mb-1">
+                  Currently Scanning
+                </p>
+                <div className="flex items-center space-x-2">
+                  <Link2 className="w-4 h-4 text-gray-400 shrink-0" />
+                  <p className="text-sm text-gray-700 dark:text-gray-300 truncate font-mono">
+                    {crawlProgress.currentUrl}
+                  </p>
+                </div>
+              </div>
+            )}
+            
+            {/* Animated Progress Bar Indeterminate Track */}
+            <div className="mt-5 w-full bg-blue-200/50 dark:bg-blue-900/30 rounded-full h-1.5 overflow-hidden relative">
+              <div className="absolute top-0 left-0 bg-blue-500 h-1.5 rounded-full w-1/3 animate-[slide_1.5s_ease-in-out_infinite]" />
+            </div>
+          </div>
+        )}
+        {/* --- END PROGRESS WIDGET --- */}
 
         {error && (
           <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4">
@@ -695,6 +787,14 @@ export default function SitemapPage() {
           </div>
         </div>
       )}
+      
+      {/* Optional animation styles for the indeterminate loading bar */}
+      <style dangerouslySetInnerHTML={{__html: `
+        @keyframes slide {
+          0% { transform: translateX(-100%); }
+          100% { transform: translateX(300%); }
+        }
+      `}} />
     </DashboardLayout>
   );
 }
