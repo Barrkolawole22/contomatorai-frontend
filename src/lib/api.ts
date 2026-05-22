@@ -497,6 +497,16 @@ export const scraperAPI = {
     makeRequest({ method: 'POST', url: '/scraper/extract', data: { url } }),
 };
 
+// ---------- PIPELINE API ----------
+export const pipelineAPI = {
+  getPipelines:   ()                       => makeRequest({ method: 'GET',    url: '/pipelines' }),
+  getRuns:        (pipelineId: string)     => makeRequest({ method: 'GET',    url: `/pipelines/${pipelineId}/runs` }),
+  createPipeline: (data: any)              => makeRequest({ method: 'POST',   url: '/pipelines', data }),
+  updatePipeline: (id: string, data: any)  => makeRequest({ method: 'PUT',    url: `/pipelines/${id}`, data }),
+  triggerPipeline:(id: string)             => makeRequest({ method: 'POST',   url: `/pipelines/${id}/trigger` }),
+  deletePipeline: (id: string)             => makeRequest({ method: 'DELETE', url: `/pipelines/${id}` }),
+};
+
 // ---------- HELPERS ----------
 export const apiHelpers = {
   hasUserSites: async (): Promise<boolean> => {
