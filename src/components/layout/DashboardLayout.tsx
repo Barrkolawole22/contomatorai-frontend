@@ -164,14 +164,14 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
       name: 'Keywords',
       href: '/keywords',
       icon: Search,
-      current: pathname === '/keywords',
+      current: pathname.startsWith('/keywords'),
       badge: null
     },
     {
       name: 'Articles',
       href: '/articles',
       icon: FileText,
-      current: pathname === '/articles',
+      current: pathname.startsWith('/articles'),
       badge: null
     },
     {
@@ -185,15 +185,14 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
       name: 'Bulk Create',
       href: '/bulk-create',
       icon: Layers,
-      current: pathname === '/bulk-create',
+      current: pathname.startsWith('/bulk-create'),
       badge: { text: 'New', color: 'bg-green-500' }
     },
-    // -- NEW Knowledgebase item inserted here --
     {
       name: 'Knowledgebase',
       href: '/knowledgebase',
       icon: BookOpen,
-      current: pathname === '/knowledgebase',
+      current: pathname.startsWith('/knowledgebase'),
       badge: null
     },
     {
@@ -207,21 +206,21 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
       name: 'Sitemap',
       href: '/dashboard/wordpress/sitemap',
       icon: Link2,
-      current: pathname === '/sitemap',
+      current: pathname.startsWith('/dashboard/wordpress/sitemap'),
       badge: null
     },
     {
       name: 'WordPress',
       href: '/dashboard/wordpress',
       icon: Globe,
-      current: pathname === '/wordpress',
+      current: pathname.startsWith('/dashboard/wordpress') && !pathname.startsWith('/dashboard/wordpress/sitemap'),
       badge: null
     },
     {
       name: 'Billing',
       href: '/dashboard/billing',
       icon: CreditCard,
-      current: pathname.startsWith('/billing'),
+      current: pathname.startsWith('/dashboard/billing'),
       badge: null
     },
     {
@@ -232,7 +231,6 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
       badge: null
     }
   ];
-
   // Show loading screen
   if (loading) {
     return (
