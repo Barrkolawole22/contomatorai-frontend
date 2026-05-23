@@ -505,6 +505,7 @@ export const pipelineAPI = {
   updatePipeline: (id: string, data: any)  => makeRequest({ method: 'PUT',    url: `/pipelines/${id}`, data }),
   triggerPipeline:(id: string)             => makeRequest({ method: 'POST',   url: `/pipelines/${id}/trigger` }),
   deletePipeline: (id: string)             => makeRequest({ method: 'DELETE', url: `/pipelines/${id}` }),
+  suggestNiche:   (siteId: string)         => makeRequest({ method: 'GET',    url: '/pipelines/suggest-niche', params: { siteId } }),
 };
 
 // ---------- HELPERS ----------

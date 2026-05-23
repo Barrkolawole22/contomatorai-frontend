@@ -7,10 +7,11 @@ import { sitesAPI, pipelineAPI } from '@/lib/api';
 import {
   Zap, Plus, Play, Trash2, RefreshCw, AlertCircle, CheckCircle,
   Clock, Globe, Brain, ChevronDown, ChevronUp, X, Calendar,
-  BarChart3, Sparkles, Lock, TrendingUp, FileText, Send, Eye
+  BarChart3, Sparkles, Lock, TrendingUp, FileText, Send, Eye, Wand2
 } from 'lucide-react';
 
 interface PipelineConfig {
+  _id: string;
   id: string;
   siteId: string;
   siteName?: string;
@@ -84,6 +85,8 @@ export default function PipelinePage() {
   const [triggeringId, setTriggeringId] = useState<string | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [detectingNiche, setDetectingNiche] = useState(false);
+  const [nicheSuggestions, setNicheSuggestions] = useState<string[]>([]);
 
   const [form, setForm] = useState({
     siteId: '',
@@ -137,6 +140,31 @@ export default function PipelinePage() {
     }
   };
 
+  const handleDetectNiche = async () => {
+    if (!form.siteId) return;
+    try {
+      setDetectingNiche(true);
+      setNicheSuggestions([]);
+      const res = await pipelineAPI.suggestNiche(form.siteId);
+      if (res.data.success && res.data.data.suggestions?.length > 0) {
+        const suggestions = res.data.data.suggestions as string[];
+        setNicheSuggestions(suggestions);
+        setForm(prev => ({ ...prev, niche: suggestions[0] }));
+      } else {
+        setFormError('Could not detect niche from this site. Please enter it manually.');
+      }
+    } catch (err: any) {
+      setFormError('Niche detection failed. Please enter manually.');
+    } finally {
+      setDetectingNiche(false);
+    }
+  };
+
+  const handleSiteChange = (siteId: string) => {
+    setForm(prev => ({ ...prev, siteId }));
+    setNicheSuggestions([]);
+  };
+
   const handleToggleExpand = (id: string) => {
     if (expandedPipeline === id) {
       setExpandedPipeline(null);
@@ -158,6 +186,7 @@ export default function PipelinePage() {
       if (res.data.success) {
         setPipelines(prev => [res.data.data, ...prev]);
         setShowCreateForm(false);
+        setNicheSuggestions([]);
         setForm(prev => ({ ...prev, niche: '' }));
       } else {
         throw new Error(res.data.message || 'Failed to create pipeline');
@@ -171,10 +200,10 @@ export default function PipelinePage() {
 
   const handleToggleActive = async (pipeline: PipelineConfig) => {
     try {
-      setTogglingId(pipeline.id);
-      const res = await pipelineAPI.updatePipeline(pipeline.id, { isActive: !pipeline.isActive });
+      setTogglingId(pipeline.id || pipeline._id);
+      const res = await pipelineAPI.updatePipeline(pipeline.id || pipeline._id, { isActive: !pipeline.isActive });
       if (res.data.success) {
-        setPipelines(prev => prev.map(p => p.id === pipeline.id ? { ...p, isActive: !p.isActive } : p));
+        setPipelines(prev => prev.map(p => (p.id || p._id) === (pipeline.id || pipeline._id) ? { ...p, isActive: !p.isActive } : p));
       }
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to update pipeline');
@@ -203,7 +232,7 @@ export default function PipelinePage() {
     try {
       setDeletingId(id);
       await pipelineAPI.deletePipeline(id);
-      setPipelines(prev => prev.filter(p => p.id !== id));
+      setPipelines(prev => prev.filter(p => (p.id || p._id) !== id));
       if (expandedPipeline === id) setExpandedPipeline(null);
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to delete pipeline');
@@ -247,12 +276,12 @@ export default function PipelinePage() {
             </div>
             <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-3">Pro Feature</h2>
             <p className="text-gray-600 dark:text-gray-400 max-w-md mx-auto mb-8">
-              The Autonomous Pipeline is available on Pro and Agency plans. It automatically finds trending topics, generates articles, and publishes them to your WordPress sites — completely hands-free.
+              The Autonomous Pipeline is available on Pro and Agency plans. It automatically fetches trending news, generates articles, and publishes them to your WordPress sites — completely hands-free.
             </p>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-2xl mx-auto mb-8">
               {[
-                { icon: TrendingUp, label: 'RSS Trend Detection', desc: 'Fetches real-time news in your niche from RSS feeds' },
-                { icon: Brain, label: 'AI Generation', desc: 'Generates a full article from scraped source content' },
+                { icon: TrendingUp, label: 'RSS Trend Detection', desc: 'Fetches real-time news in your niche' },
+                { icon: Brain, label: 'AI Generation', desc: 'Generates full articles from scraped content' },
                 { icon: Send, label: 'Auto Publish', desc: 'Publishes to WordPress on your schedule' }
               ].map(({ icon: Icon, label, desc }) => (
                 <div key={label} className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg text-left">
@@ -262,10 +291,7 @@ export default function PipelinePage() {
                 </div>
               ))}
             </div>
-            <button
-              onClick={() => router.push('/billing')}
-              className="px-8 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 font-medium shadow-lg hover:shadow-xl transition-all"
-            >
+            <button onClick={() => router.push('/billing')} className="px-8 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 font-medium">
               Upgrade to Pro
             </button>
           </div>
@@ -283,10 +309,7 @@ export default function PipelinePage() {
             <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Autonomous Pipeline</h1>
             <p className="text-gray-600 dark:text-gray-400 mt-1">Set up automated content generation and publishing</p>
           </div>
-          <button
-            onClick={() => setShowCreateForm(true)}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 font-medium shadow-sm"
-          >
+          <button onClick={() => setShowCreateForm(true)} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 font-medium shadow-sm">
             <Plus className="w-4 h-4" /> New Pipeline
           </button>
         </div>
@@ -297,9 +320,7 @@ export default function PipelinePage() {
             <div className="flex items-center gap-3">
               <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0" />
               <p className="text-sm text-red-700 dark:text-red-300">{error}</p>
-              <button onClick={() => setError(null)} className="ml-auto text-red-400 hover:text-red-600">
-                <X className="w-4 h-4" />
-              </button>
+              <button onClick={() => setError(null)} className="ml-auto text-red-400 hover:text-red-600"><X className="w-4 h-4" /></button>
             </div>
           </div>
         )}
@@ -312,7 +333,7 @@ export default function PipelinePage() {
           <p className="text-blue-100 text-sm max-w-2xl">
             Each pipeline fetches real-time news from RSS feeds in your niche, scrapes full article content, generates a complete article with your chosen AI model, then either previews it or publishes directly to WordPress.
           </p>
-          <div className="flex items-center gap-2 mt-4 text-sm text-blue-100">
+          <div className="flex items-center gap-2 mt-4 text-sm text-blue-100 flex-wrap">
             {[
               { icon: TrendingUp, label: 'RSS Fetch' },
               { icon: Brain, label: 'Scrape' },
@@ -320,12 +341,12 @@ export default function PipelinePage() {
               { icon: Eye, label: 'Preview' },
               { icon: Send, label: 'Publish' },
             ].map(({ icon: Icon, label }, i, arr) => (
-              <>
-                <div key={label} className="flex items-center gap-1 bg-white/10 px-3 py-1 rounded-full">
+              <span key={label} className="flex items-center gap-1">
+                <span className="flex items-center gap-1 bg-white/10 px-3 py-1 rounded-full">
                   <Icon className="w-3 h-3" /> {label}
-                </div>
-                {i < arr.length - 1 && <span>→</span>}
-              </>
+                </span>
+                {i < arr.length - 1 && <span className="opacity-60">→</span>}
+              </span>
             ))}
           </div>
         </div>
@@ -335,7 +356,7 @@ export default function PipelinePage() {
           <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Create New Pipeline</h3>
-              <button onClick={() => { setShowCreateForm(false); setFormError(null); }} className="text-gray-400 hover:text-gray-600">
+              <button onClick={() => { setShowCreateForm(false); setFormError(null); setNicheSuggestions([]); }} className="text-gray-400 hover:text-gray-600">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -347,6 +368,7 @@ export default function PipelinePage() {
             )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Site */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">WordPress Site *</label>
                 {sites.length === 0 ? (
@@ -354,7 +376,7 @@ export default function PipelinePage() {
                 ) : (
                   <select
                     value={form.siteId}
-                    onChange={e => setForm(prev => ({ ...prev, siteId: e.target.value }))}
+                    onChange={e => handleSiteChange(e.target.value)}
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                   >
                     {sites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -362,17 +384,52 @@ export default function PipelinePage() {
                 )}
               </div>
 
+              {/* Niche with auto-detect */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Content Niche *</label>
-                <input
-                  type="text"
-                  value={form.niche}
-                  onChange={e => setForm(prev => ({ ...prev, niche: e.target.value }))}
-                  placeholder="e.g. Nigerian company law, digital marketing, tech news"
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                />
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Content Niche *
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={form.niche}
+                    onChange={e => setForm(prev => ({ ...prev, niche: e.target.value }))}
+                    placeholder="e.g. Nigerian company law, tech news"
+                    className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleDetectNiche}
+                    disabled={detectingNiche || !form.siteId}
+                    title="Auto-detect niche from your site"
+                    className="px-3 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 flex items-center gap-1.5 text-sm font-medium whitespace-nowrap"
+                  >
+                    {detectingNiche ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
+                    {detectingNiche ? 'Detecting...' : 'Auto-detect'}
+                  </button>
+                </div>
+
+                {/* Niche suggestions */}
+                {nicheSuggestions.length > 1 && (
+                  <div className="mt-2">
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Other suggestions from your site:</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {nicheSuggestions.slice(1).map(s => (
+                        <button
+                          key={s}
+                          type="button"
+                          onClick={() => setForm(prev => ({ ...prev, niche: s }))}
+                          className="px-2.5 py-1 text-xs bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-700 rounded-full hover:bg-purple-100 dark:hover:bg-purple-900/40 transition-colors"
+                        >
+                          {s}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
 
+              {/* Schedule */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Schedule</label>
                 <select
@@ -386,6 +443,7 @@ export default function PipelinePage() {
                 </select>
               </div>
 
+              {/* AI Model */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">AI Model</label>
                 <select
@@ -399,6 +457,7 @@ export default function PipelinePage() {
                 </select>
               </div>
 
+              {/* Word Count */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Target Word Count</label>
                 <input
@@ -410,6 +469,7 @@ export default function PipelinePage() {
                 />
               </div>
 
+              {/* Max Articles */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Max Articles Per Run</label>
                 <input
@@ -421,6 +481,7 @@ export default function PipelinePage() {
                 />
               </div>
 
+              {/* Preview Window */}
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Preview Window</label>
                 <div className="flex items-center gap-4">
@@ -450,7 +511,7 @@ export default function PipelinePage() {
 
             <div className="flex justify-end gap-3 mt-6">
               <button
-                onClick={() => { setShowCreateForm(false); setFormError(null); }}
+                onClick={() => { setShowCreateForm(false); setFormError(null); setNicheSuggestions([]); }}
                 className="px-4 py-2 border border-gray-300 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700"
               >
                 Cancel
@@ -474,10 +535,7 @@ export default function PipelinePage() {
             <p className="text-gray-500 dark:text-gray-400 mb-6 max-w-sm mx-auto">
               Create your first autonomous pipeline and let AI generate and publish content for you automatically.
             </p>
-            <button
-              onClick={() => setShowCreateForm(true)}
-              className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 mx-auto font-medium"
-            >
+            <button onClick={() => setShowCreateForm(true)} className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 mx-auto font-medium">
               <Plus className="w-5 h-5" /> Create First Pipeline
             </button>
           </div>
@@ -486,124 +544,124 @@ export default function PipelinePage() {
         {/* Pipeline List */}
         {pipelines.length > 0 && (
           <div className="space-y-4">
-            {pipelines.map(pipeline => (
-              <div key={pipeline.id} className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-                <div className="p-5">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-start gap-4 flex-1">
-                      {/* Active toggle */}
-                      <button
-                        onClick={() => handleToggleActive(pipeline)}
-                        disabled={togglingId === pipeline.id}
-                        className={`mt-1 flex-shrink-0 w-10 h-6 rounded-full transition-colors relative ${pipeline.isActive ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'} ${togglingId === pipeline.id ? 'opacity-50' : ''}`}
-                      >
-                        <span className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${pipeline.isActive ? 'translate-x-5' : 'translate-x-1'}`} />
-                      </button>
+            {pipelines.map(pipeline => {
+              const pipelineId = pipeline.id || pipeline._id;
+              return (
+                <div key={pipelineId} className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+                  <div className="p-5">
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-start gap-4 flex-1">
+                        {/* Active toggle */}
+                        <button
+                          onClick={() => handleToggleActive(pipeline)}
+                          disabled={togglingId === pipelineId}
+                          className={`mt-1 flex-shrink-0 w-10 h-6 rounded-full transition-colors relative ${pipeline.isActive ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'} ${togglingId === pipelineId ? 'opacity-50' : ''}`}
+                        >
+                          <span className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${pipeline.isActive ? 'translate-x-5' : 'translate-x-1'}`} />
+                        </button>
 
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 flex-wrap">
-                          <h3 className="font-semibold text-gray-900 dark:text-white">{pipeline.niche}</h3>
-                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${pipeline.isActive ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'}`}>
-                            {pipeline.isActive ? 'Active' : 'Paused'}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-4 mt-2 text-sm text-gray-500 dark:text-gray-400 flex-wrap">
-                          <span className="flex items-center gap-1"><Globe className="w-3.5 h-3.5" />{pipeline.siteName || 'WordPress Site'}</span>
-                          <span className="flex items-center gap-1"><Calendar className="w-3.5 h-3.5" />{SCHEDULE_LABELS[pipeline.schedule]}</span>
-                          <span className="flex items-center gap-1"><Brain className="w-3.5 h-3.5" />{MODEL_LABELS[pipeline.aiModel]}</span>
-                          <span className="flex items-center gap-1"><BarChart3 className="w-3.5 h-3.5" />{pipeline.targetWordCount} words</span>
-                          <span className="flex items-center gap-1"><FileText className="w-3.5 h-3.5" />Max {pipeline.maxArticlesPerRun}/run</span>
-                          {pipeline.previewWindowMinutes > 0 && (
-                            <span className="flex items-center gap-1"><Eye className="w-3.5 h-3.5" />{pipeline.previewWindowMinutes}min preview</span>
-                          )}
-                          {pipeline.lastRunAt && (
-                            <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5" />Last run: {formatDate(pipeline.lastRunAt)}</span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2 ml-4 flex-shrink-0">
-                      <button
-                        onClick={() => handleTrigger(pipeline.id)}
-                        disabled={triggeringId === pipeline.id}
-                        className="px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5 text-sm font-medium"
-                      >
-                        {triggeringId === pipeline.id ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
-                        Run Now
-                      </button>
-                      <button
-                        onClick={() => handleToggleExpand(pipeline.id)}
-                        className="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
-                      >
-                        {expandedPipeline === pipeline.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                      </button>
-                      <button
-                        onClick={() => handleDelete(pipeline.id)}
-                        disabled={deletingId === pipeline.id}
-                        className="p-1.5 text-red-400 hover:text-red-600 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50"
-                      >
-                        {deletingId === pipeline.id ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Run History */}
-                {expandedPipeline === pipeline.id && (
-                  <div className="border-t border-gray-200 dark:border-gray-700 p-5">
-                    <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
-                      <Clock className="w-4 h-4" /> Run History
-                    </h4>
-                    {!runs[pipeline.id] ? (
-                      <div className="flex items-center gap-2 text-sm text-gray-500">
-                        <RefreshCw className="w-4 h-4 animate-spin" /> Loading runs...
-                      </div>
-                    ) : runs[pipeline.id].length === 0 ? (
-                      <p className="text-sm text-gray-500 dark:text-gray-400">No runs yet. Click "Run Now" to trigger the pipeline manually.</p>
-                    ) : (
-                      <div className="space-y-3">
-                        {runs[pipeline.id].slice(0, 5).map(run => (
-                          <div key={run.id} className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-                            <div className="flex items-center justify-between mb-2">
-                              <div className="flex items-center gap-3">
-                                <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${getRunStatusColor(run.status)}`}>
-                                  {run.status === 'running' && <RefreshCw className="w-3 h-3 inline mr-1 animate-spin" />}
-                                  {run.status}
-                                </span>
-                                <span className="text-sm text-gray-500 dark:text-gray-400">{formatDate(run.runAt)}</span>
-                              </div>
-                              <div className="flex items-center gap-3 text-sm text-gray-500 dark:text-gray-400">
-                                <span className="flex items-center gap-1"><FileText className="w-3.5 h-3.5" />{run.articlesGenerated} generated</span>
-                                <span className="flex items-center gap-1"><Send className="w-3.5 h-3.5" />{run.articlesPublished} published</span>
-                              </div>
-                            </div>
-                            {run.results?.length > 0 && (
-                              <div className="space-y-1 mt-2">
-                                {run.results.map((result, idx) => (
-                                  <div key={idx} className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
-                                    {result.status === 'published' ? <CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" /> :
-                                     result.status === 'failed' ? <AlertCircle className="w-3.5 h-3.5 text-red-500 flex-shrink-0" /> :
-                                     <FileText className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />}
-                                    <span className="truncate">{result.topic}</span>
-                                    {result.error && <span className="text-red-500 ml-auto flex-shrink-0">— {result.error}</span>}
-                                  </div>
-                                ))}
-                              </div>
+                        <div className="flex-1">
+                          <div className="flex items-center gap-3 flex-wrap">
+                            <h3 className="font-semibold text-gray-900 dark:text-white">{pipeline.niche}</h3>
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${pipeline.isActive ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'}`}>
+                              {pipeline.isActive ? 'Active' : 'Paused'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-4 mt-2 text-sm text-gray-500 dark:text-gray-400 flex-wrap">
+                            <span className="flex items-center gap-1"><Globe className="w-3.5 h-3.5" />{pipeline.siteName || 'WordPress Site'}</span>
+                            <span className="flex items-center gap-1"><Calendar className="w-3.5 h-3.5" />{SCHEDULE_LABELS[pipeline.schedule]}</span>
+                            <span className="flex items-center gap-1"><Brain className="w-3.5 h-3.5" />{MODEL_LABELS[pipeline.aiModel]}</span>
+                            <span className="flex items-center gap-1"><BarChart3 className="w-3.5 h-3.5" />{pipeline.targetWordCount} words</span>
+                            <span className="flex items-center gap-1"><FileText className="w-3.5 h-3.5" />Max {pipeline.maxArticlesPerRun}/run</span>
+                            {pipeline.previewWindowMinutes > 0 && (
+                              <span className="flex items-center gap-1"><Eye className="w-3.5 h-3.5" />{pipeline.previewWindowMinutes}min preview</span>
                             )}
-                            {run.errors?.length > 0 && (
-                              <div className="mt-2 p-2 bg-red-50 dark:bg-red-900/20 rounded text-xs text-red-600 dark:text-red-400">
-                                {run.errors.join('; ')}
-                              </div>
+                            {pipeline.lastRunAt && (
+                              <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5" />Last: {formatDate(pipeline.lastRunAt)}</span>
                             )}
                           </div>
-                        ))}
+                        </div>
                       </div>
-                    )}
+
+                      <div className="flex items-center gap-2 ml-4 flex-shrink-0">
+                        <button
+                          onClick={() => handleTrigger(pipelineId)}
+                          disabled={triggeringId === pipelineId}
+                          className="px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5 text-sm font-medium"
+                        >
+                          {triggeringId === pipelineId ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
+                          Run Now
+                        </button>
+                        <button onClick={() => handleToggleExpand(pipelineId)} className="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
+                          {expandedPipeline === pipelineId ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                        </button>
+                        <button
+                          onClick={() => handleDelete(pipelineId)}
+                          disabled={deletingId === pipelineId}
+                          className="p-1.5 text-red-400 hover:text-red-600 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50"
+                        >
+                          {deletingId === pipelineId ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                )}
-              </div>
-            ))}
+
+                  {/* Run History */}
+                  {expandedPipeline === pipelineId && (
+                    <div className="border-t border-gray-200 dark:border-gray-700 p-5">
+                      <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
+                        <Clock className="w-4 h-4" /> Run History
+                      </h4>
+                      {!runs[pipelineId] ? (
+                        <div className="flex items-center gap-2 text-sm text-gray-500">
+                          <RefreshCw className="w-4 h-4 animate-spin" /> Loading runs...
+                        </div>
+                      ) : runs[pipelineId].length === 0 ? (
+                        <p className="text-sm text-gray-500 dark:text-gray-400">No runs yet. Click "Run Now" to trigger the pipeline manually.</p>
+                      ) : (
+                        <div className="space-y-3">
+                          {runs[pipelineId].slice(0, 5).map(run => (
+                            <div key={run.id} className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="flex items-center gap-3">
+                                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${getRunStatusColor(run.status)}`}>
+                                    {run.status === 'running' && <RefreshCw className="w-3 h-3 inline mr-1 animate-spin" />}
+                                    {run.status}
+                                  </span>
+                                  <span className="text-sm text-gray-500 dark:text-gray-400">{formatDate(run.runAt)}</span>
+                                </div>
+                                <div className="flex items-center gap-3 text-sm text-gray-500 dark:text-gray-400">
+                                  <span className="flex items-center gap-1"><FileText className="w-3.5 h-3.5" />{run.articlesGenerated} generated</span>
+                                  <span className="flex items-center gap-1"><Send className="w-3.5 h-3.5" />{run.articlesPublished} published</span>
+                                </div>
+                              </div>
+                              {run.results?.length > 0 && (
+                                <div className="space-y-1 mt-2">
+                                  {run.results.map((result, idx) => (
+                                    <div key={idx} className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
+                                      {result.status === 'published' ? <CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" /> :
+                                       result.status === 'failed' ? <AlertCircle className="w-3.5 h-3.5 text-red-500 flex-shrink-0" /> :
+                                       <FileText className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />}
+                                      <span className="truncate">{result.topic}</span>
+                                      {result.error && <span className="text-red-500 ml-auto flex-shrink-0">— {result.error}</span>}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              {run.errors?.length > 0 && (
+                                <div className="mt-2 p-2 bg-red-50 dark:bg-red-900/20 rounded text-xs text-red-600 dark:text-red-400">
+                                  {run.errors.join('; ')}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
