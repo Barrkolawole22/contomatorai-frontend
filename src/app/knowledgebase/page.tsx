@@ -52,7 +52,6 @@ function StatusBadge({ status, error }: { status: KnowledgeDoc['status']; error?
       </span>
     );
   }
-  // failed
   return (
     <span
       title={error || 'Processing failed'}
@@ -97,7 +96,7 @@ function DeleteModal({
         <p className="mt-3 text-sm text-gray-600">
           Are you sure you want to delete{' '}
           <span className="font-medium text-gray-900">"{doc.title}"</span>? This will remove the
-          file and all its embeddings. This action cannot be undone.
+          file and all its stored content. This action cannot be undone.
         </p>
         <div className="mt-6 flex justify-end gap-3">
           <button
@@ -272,7 +271,6 @@ function DocumentsTable({
             <th className="px-4 py-3 text-left font-medium text-gray-600">Document</th>
             <th className="px-4 py-3 text-left font-medium text-gray-600">Type</th>
             <th className="px-4 py-3 text-right font-medium text-gray-600">Words</th>
-            <th className="px-4 py-3 text-right font-medium text-gray-600">Chunks</th>
             <th className="px-4 py-3 text-left font-medium text-gray-600">Status</th>
             <th className="px-4 py-3 text-left font-medium text-gray-600">Uploaded</th>
             <th className="px-4 py-3 text-right font-medium text-gray-600">Size</th>
@@ -298,9 +296,6 @@ function DocumentsTable({
               </td>
               <td className="px-4 py-3 text-right text-gray-700">
                 {doc.totalWords > 0 ? doc.totalWords.toLocaleString() : '—'}
-              </td>
-              <td className="px-4 py-3 text-right text-gray-700">
-                {doc.totalChunks > 0 ? doc.totalChunks : '—'}
               </td>
               <td className="px-4 py-3">
                 <StatusBadge status={doc.status} error={doc.processingError} />
@@ -333,30 +328,28 @@ export default function KnowledgebasePage() {
   const [docToDelete, setDocToDelete] = useState<KnowledgeDoc | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  // Poll while any doc is still processing
   const hasProcessing = docs.some(d => d.status === 'processing');
 
-const fetchDocs = useCallback(async () => {
-  try {
-    const res = await knowledgebaseAPI.getDocuments();
-    const docs = (res.data.data as any[]).map((d: any) => ({
-      ...d,
-      id: d._id,         
-    }));
-    setDocs(docs as KnowledgeDoc[]);
-    setFetchError(null);
-  } catch (err: any) {
-    setFetchError(err?.response?.data?.message || 'Failed to load documents');
-  } finally {
-    setLoading(false);
-  }
-}, []);
+  const fetchDocs = useCallback(async () => {
+    try {
+      const res = await knowledgebaseAPI.getDocuments();
+      const docs = (res.data.data as any[]).map((d: any) => ({
+        ...d,
+        id: d._id,
+      }));
+      setDocs(docs as KnowledgeDoc[]);
+      setFetchError(null);
+    } catch (err: any) {
+      setFetchError(err?.response?.data?.message || 'Failed to load documents');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     fetchDocs();
   }, [fetchDocs]);
 
-  // Poll every 5 s while docs are processing
   useEffect(() => {
     if (!hasProcessing) return;
     const interval = setInterval(fetchDocs, 5000);
@@ -384,7 +377,6 @@ const fetchDocs = useCallback(async () => {
   return (
     <DashboardLayout>
       <div className="mx-auto max-w-5xl space-y-6 px-4 py-8 sm:px-6">
-        {/* Header */}
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Knowledgebase</h1>
@@ -397,10 +389,8 @@ const fetchDocs = useCallback(async () => {
           </span>
         </div>
 
-        {/* Upload area */}
         <UploadArea onUploaded={handleUploaded} />
 
-        {/* Documents list */}
         {loading ? (
           <div className="flex justify-center py-12">
             <Loader2 className="h-6 w-6 animate-spin text-indigo-500" />
@@ -421,7 +411,6 @@ const fetchDocs = useCallback(async () => {
         )}
       </div>
 
-      {/* Delete modal */}
       {docToDelete && (
         <DeleteModal
           doc={docToDelete}
