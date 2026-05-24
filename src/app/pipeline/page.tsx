@@ -7,17 +7,16 @@ import { sitesAPI, pipelineAPI } from '@/lib/api';
 import {
   Zap, Plus, Play, Trash2, RefreshCw, AlertCircle, CheckCircle,
   Clock, Globe, Brain, ChevronDown, ChevronUp, X, Calendar,
-  BarChart3, Sparkles, Lock, TrendingUp, FileText, Send, Eye, Wand2
+  BarChart3, Sparkles, Lock, TrendingUp, FileText, Send, Eye, Wand2, SkipForward, Tag
 } from 'lucide-react';
 
 interface PipelineConfig {
   _id: string;
   id: string;
   siteId: string;
-  siteName?: string;
   isActive: boolean;
-  schedule: 'hourly' | 'twice_daily' | 'daily' | 'weekly';
-  niche: string;
+  schedule: 'hourly' | 'every_2_hours' | 'every_4_hours' | 'twice_daily' | 'three_daily' | 'daily' | 'weekly';
+  niches: string[];
   targetWordCount: number;
   aiModel: 'gemini' | 'gemini-pro' | 'gpt4o' | 'claude';
   previewWindowMinutes: number;
@@ -28,17 +27,18 @@ interface PipelineConfig {
 
 interface PipelineRun {
   id: string;
+  _id: string;
   pipelineConfigId: string;
   status: 'running' | 'completed' | 'failed';
   articlesGenerated: number;
   articlesPublished: number;
-  errors: string[];
+  runErrors: string[];
   runAt: string;
   completedAt?: string;
   results: Array<{
     topic: string;
     contentId?: string;
-    status: 'generated' | 'published' | 'failed';
+    status: 'generated' | 'published' | 'failed' | 'skipped';
     error?: string;
   }>;
 }
@@ -58,17 +58,13 @@ const MODEL_LABELS: Record<string, string> = {
 };
 
 const SCHEDULE_LABELS: Record<string, string> = {
-  hourly: 'Every Hour',
-  twice_daily: 'Twice Daily',
-  daily: 'Once Daily',
-  weekly: 'Weekly'
-};
-
-const SCHEDULE_CRON: Record<string, string> = {
-  hourly: '0 * * * *',
-  twice_daily: '0 8,20 * * *',
-  daily: '0 9 * * *',
-  weekly: '0 9 * * 1'
+  hourly:        'Every Hour',
+  every_2_hours: 'Every 2 Hours',
+  every_4_hours: 'Every 4 Hours',
+  twice_daily:   'Twice Daily (6am & 6pm)',
+  three_daily:   'Three Times Daily (7am, 1pm, 7pm)',
+  daily:         'Once Daily (8am)',
+  weekly:        'Weekly (Monday 8am)',
 };
 
 export default function PipelinePage() {
@@ -87,21 +83,27 @@ export default function PipelinePage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [detectingNiche, setDetectingNiche] = useState(false);
   const [nicheSuggestions, setNicheSuggestions] = useState<string[]>([]);
+  const [nicheInput, setNicheInput] = useState('');
 
   const [form, setForm] = useState({
     siteId: '',
-    niche: '',
-    schedule: 'daily' as PipelineConfig['schedule'],
+    niches: [] as string[],
+    schedule: 'every_4_hours' as PipelineConfig['schedule'],
     aiModel: 'gemini-pro' as PipelineConfig['aiModel'],
     targetWordCount: 1200,
     previewWindowMinutes: 15,
-    maxArticlesPerRun: 3
+    maxArticlesPerRun: 3,
   });
   const [formLoading, setFormLoading] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   const userPlan = user?.plan || user?.subscription?.plan || 'free';
   const isPro = ['pro', 'agency', 'enterprise'].includes(userPlan.toLowerCase());
+
+  const getSiteName = (siteId: string): string => {
+    const site = sites.find(s => s.id === siteId || (s as any)._id === siteId);
+    return site?.name || 'WordPress Site';
+  };
 
   useEffect(() => { loadData(); }, []);
 
@@ -111,7 +113,7 @@ export default function PipelinePage() {
       setError(null);
       const [sitesRes, pipelinesRes] = await Promise.all([
         sitesAPI.getUserSites(),
-        pipelineAPI.getPipelines()
+        pipelineAPI.getPipelines(),
       ]);
       if (sitesRes.data.success) {
         setSites(sitesRes.data.data || []);
@@ -140,6 +142,25 @@ export default function PipelinePage() {
     }
   };
 
+  // Niche tag management
+  const addNiche = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed || form.niches.includes(trimmed)) return;
+    setForm(prev => ({ ...prev, niches: [...prev.niches, trimmed] }));
+    setNicheInput('');
+  };
+
+  const removeNiche = (niche: string) => {
+    setForm(prev => ({ ...prev, niches: prev.niches.filter(n => n !== niche) }));
+  };
+
+  const handleNicheKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      addNiche(nicheInput);
+    }
+  };
+
   const handleDetectNiche = async () => {
     if (!form.siteId) return;
     try {
@@ -149,9 +170,13 @@ export default function PipelinePage() {
       if (res.data.success && res.data.data.suggestions?.length > 0) {
         const suggestions = res.data.data.suggestions as string[];
         setNicheSuggestions(suggestions);
-        setForm(prev => ({ ...prev, niche: suggestions[0] }));
+        // Add all suggestions as niches (deduplicated)
+        setForm(prev => ({
+          ...prev,
+          niches: [...new Set([...prev.niches, ...suggestions])],
+        }));
       } else {
-        setFormError('Could not detect niche from this site. Please enter it manually.');
+        setFormError('Could not detect niches from this site. Please enter them manually.');
       }
     } catch (err: any) {
       setFormError('Niche detection failed. Please enter manually.');
@@ -175,8 +200,8 @@ export default function PipelinePage() {
   };
 
   const handleCreate = async () => {
-    if (!form.siteId || !form.niche.trim()) {
-      setFormError('Site and niche are required');
+    if (!form.siteId || form.niches.length === 0) {
+      setFormError('Site and at least one niche keyword are required');
       return;
     }
     try {
@@ -187,7 +212,8 @@ export default function PipelinePage() {
         setPipelines(prev => [res.data.data, ...prev]);
         setShowCreateForm(false);
         setNicheSuggestions([]);
-        setForm(prev => ({ ...prev, niche: '' }));
+        setNicheInput('');
+        setForm(prev => ({ ...prev, niches: [] }));
       } else {
         throw new Error(res.data.message || 'Failed to create pipeline');
       }
@@ -199,11 +225,14 @@ export default function PipelinePage() {
   };
 
   const handleToggleActive = async (pipeline: PipelineConfig) => {
+    const pipelineId = pipeline.id || pipeline._id;
     try {
-      setTogglingId(pipeline.id || pipeline._id);
-      const res = await pipelineAPI.updatePipeline(pipeline.id || pipeline._id, { isActive: !pipeline.isActive });
+      setTogglingId(pipelineId);
+      const res = await pipelineAPI.updatePipeline(pipelineId, { isActive: !pipeline.isActive });
       if (res.data.success) {
-        setPipelines(prev => prev.map(p => (p.id || p._id) === (pipeline.id || pipeline._id) ? { ...p, isActive: !p.isActive } : p));
+        setPipelines(prev => prev.map(p =>
+          (p.id || p._id) === pipelineId ? { ...p, isActive: !p.isActive } : p
+        ));
       }
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to update pipeline');
@@ -252,6 +281,15 @@ export default function PipelinePage() {
     }
   };
 
+  const getResultIcon = (status: PipelineRun['results'][0]['status']) => {
+    switch (status) {
+      case 'published': return <CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />;
+      case 'failed':    return <AlertCircle className="w-3.5 h-3.5 text-red-500 flex-shrink-0" />;
+      case 'skipped':   return <SkipForward className="w-3.5 h-3.5 text-yellow-500 flex-shrink-0" />;
+      default:          return <FileText className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />;
+    }
+  };
+
   if (loading) {
     return (
       <DashboardLayout>
@@ -278,19 +316,6 @@ export default function PipelinePage() {
             <p className="text-gray-600 dark:text-gray-400 max-w-md mx-auto mb-8">
               The Autonomous Pipeline is available on Pro and Agency plans. It automatically fetches trending news, generates articles, and publishes them to your WordPress sites — completely hands-free.
             </p>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-2xl mx-auto mb-8">
-              {[
-                { icon: TrendingUp, label: 'RSS Trend Detection', desc: 'Fetches real-time news in your niche' },
-                { icon: Brain, label: 'AI Generation', desc: 'Generates full articles from scraped content' },
-                { icon: Send, label: 'Auto Publish', desc: 'Publishes to WordPress on your schedule' }
-              ].map(({ icon: Icon, label, desc }) => (
-                <div key={label} className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg text-left">
-                  <Icon className="w-6 h-6 text-purple-600 dark:text-purple-400 mb-2" />
-                  <div className="font-medium text-gray-900 dark:text-white text-sm mb-1">{label}</div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">{desc}</div>
-                </div>
-              ))}
-            </div>
             <button onClick={() => router.push('/billing')} className="px-8 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 font-medium">
               Upgrade to Pro
             </button>
@@ -331,11 +356,11 @@ export default function PipelinePage() {
             <Sparkles className="w-5 h-5" /> How Autonomous Pipeline Works
           </h3>
           <p className="text-blue-100 text-sm max-w-2xl">
-            Each pipeline fetches real-time news from RSS feeds in your niche, scrapes full article content, generates a complete article with your chosen AI model, then either previews it or publishes directly to WordPress.
+            Each pipeline monitors multiple keyword niches, fetches the latest news (last 4 hours), generates complete articles with your chosen AI model, then previews or publishes directly to WordPress.
           </p>
           <div className="flex items-center gap-2 mt-4 text-sm text-blue-100 flex-wrap">
             {[
-              { icon: TrendingUp, label: 'RSS Fetch' },
+              { icon: TrendingUp, label: 'RSS Fetch (4h)' },
               { icon: Brain, label: 'Scrape' },
               { icon: FileText, label: 'Generate' },
               { icon: Eye, label: 'Preview' },
@@ -356,7 +381,7 @@ export default function PipelinePage() {
           <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Create New Pipeline</h3>
-              <button onClick={() => { setShowCreateForm(false); setFormError(null); setNicheSuggestions([]); }} className="text-gray-400 hover:text-gray-600">
+              <button onClick={() => { setShowCreateForm(false); setFormError(null); setNicheSuggestions([]); setNicheInput(''); }} className="text-gray-400 hover:text-gray-600">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -384,51 +409,6 @@ export default function PipelinePage() {
                 )}
               </div>
 
-              {/* Niche with auto-detect */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Content Niche *
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={form.niche}
-                    onChange={e => setForm(prev => ({ ...prev, niche: e.target.value }))}
-                    placeholder="e.g. Nigerian company law, tech news"
-                    className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleDetectNiche}
-                    disabled={detectingNiche || !form.siteId}
-                    title="Auto-detect niche from your site"
-                    className="px-3 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 flex items-center gap-1.5 text-sm font-medium whitespace-nowrap"
-                  >
-                    {detectingNiche ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
-                    {detectingNiche ? 'Detecting...' : 'Auto-detect'}
-                  </button>
-                </div>
-
-                {/* Niche suggestions */}
-                {nicheSuggestions.length > 1 && (
-                  <div className="mt-2">
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Other suggestions from your site:</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {nicheSuggestions.slice(1).map(s => (
-                        <button
-                          key={s}
-                          type="button"
-                          onClick={() => setForm(prev => ({ ...prev, niche: s }))}
-                          className="px-2.5 py-1 text-xs bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-700 rounded-full hover:bg-purple-100 dark:hover:bg-purple-900/40 transition-colors"
-                        >
-                          {s}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-
               {/* Schedule */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Schedule</label>
@@ -438,9 +418,62 @@ export default function PipelinePage() {
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 >
                   {Object.entries(SCHEDULE_LABELS).map(([key, label]) => (
-                    <option key={key} value={key}>{label} ({SCHEDULE_CRON[key]})</option>
+                    <option key={key} value={key}>{label}</option>
                   ))}
                 </select>
+              </div>
+
+              {/* Niches -- full width, tag input */}
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Content Niches * <span className="font-normal text-gray-400">(add multiple keywords — press Enter or comma to add each)</span>
+                </label>
+
+                {/* Tag display */}
+                {form.niches.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mb-2">
+                    {form.niches.map(niche => (
+                      <span key={niche} className="flex items-center gap-1 px-2.5 py-1 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-700 rounded-full text-xs font-medium">
+                        <Tag className="w-3 h-3" />
+                        {niche}
+                        <button type="button" onClick={() => removeNiche(niche)} className="ml-0.5 hover:text-red-500">
+                          <X className="w-3 h-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={nicheInput}
+                    onChange={e => setNicheInput(e.target.value)}
+                    onKeyDown={handleNicheKeyDown}
+                    onBlur={() => { if (nicheInput.trim()) addNiche(nicheInput); }}
+                    placeholder='e.g. Nigeria court ruling, EFCC, Supreme Court Nigeria'
+                    className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => addNiche(nicheInput)}
+                    disabled={!nicheInput.trim()}
+                    className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40 text-sm font-medium"
+                  >
+                    Add
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDetectNiche}
+                    disabled={detectingNiche || !form.siteId}
+                    title="Auto-detect niches from your site"
+                    className="px-3 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 flex items-center gap-1.5 text-sm font-medium whitespace-nowrap"
+                  >
+                    {detectingNiche ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
+                    {detectingNiche ? 'Detecting...' : 'Auto-detect'}
+                  </button>
+                </div>
+                <p className="text-xs text-gray-400 mt-1">Each keyword is searched separately on Google News. More keywords = more diverse articles per run.</p>
               </div>
 
               {/* AI Model */}
@@ -464,7 +497,7 @@ export default function PipelinePage() {
                   type="number"
                   value={form.targetWordCount}
                   onChange={e => setForm(prev => ({ ...prev, targetWordCount: parseInt(e.target.value) || 1200 }))}
-                  min="500" max="1500" step="100"
+                  min="500" max="3000" step="100"
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 />
               </div>
@@ -511,14 +544,14 @@ export default function PipelinePage() {
 
             <div className="flex justify-end gap-3 mt-6">
               <button
-                onClick={() => { setShowCreateForm(false); setFormError(null); setNicheSuggestions([]); }}
+                onClick={() => { setShowCreateForm(false); setFormError(null); setNicheSuggestions([]); setNicheInput(''); }}
                 className="px-4 py-2 border border-gray-300 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700"
               >
                 Cancel
               </button>
               <button
                 onClick={handleCreate}
-                disabled={formLoading || !form.siteId || !form.niche.trim()}
+                disabled={formLoading || !form.siteId || form.niches.length === 0}
                 className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 font-medium"
               >
                 {formLoading ? <><RefreshCw className="w-4 h-4 animate-spin" /> Creating...</> : <><Plus className="w-4 h-4" /> Create Pipeline</>}
@@ -546,6 +579,7 @@ export default function PipelinePage() {
           <div className="space-y-4">
             {pipelines.map(pipeline => {
               const pipelineId = pipeline.id || pipeline._id;
+              const niches = pipeline.niches || [];
               return (
                 <div key={pipelineId} className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
                   <div className="p-5">
@@ -561,14 +595,19 @@ export default function PipelinePage() {
                         </button>
 
                         <div className="flex-1">
-                          <div className="flex items-center gap-3 flex-wrap">
-                            <h3 className="font-semibold text-gray-900 dark:text-white">{pipeline.niche}</h3>
+                          {/* Niche tags */}
+                          <div className="flex items-center gap-2 flex-wrap mb-1">
+                            {niches.map(n => (
+                              <span key={n} className="text-xs px-2 py-0.5 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-700 rounded-full font-medium">
+                                {n}
+                              </span>
+                            ))}
                             <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${pipeline.isActive ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'}`}>
                               {pipeline.isActive ? 'Active' : 'Paused'}
                             </span>
                           </div>
                           <div className="flex items-center gap-4 mt-2 text-sm text-gray-500 dark:text-gray-400 flex-wrap">
-                            <span className="flex items-center gap-1"><Globe className="w-3.5 h-3.5" />{pipeline.siteName || 'WordPress Site'}</span>
+                            <span className="flex items-center gap-1"><Globe className="w-3.5 h-3.5" />{getSiteName(pipeline.siteId)}</span>
                             <span className="flex items-center gap-1"><Calendar className="w-3.5 h-3.5" />{SCHEDULE_LABELS[pipeline.schedule]}</span>
                             <span className="flex items-center gap-1"><Brain className="w-3.5 h-3.5" />{MODEL_LABELS[pipeline.aiModel]}</span>
                             <span className="flex items-center gap-1"><BarChart3 className="w-3.5 h-3.5" />{pipeline.targetWordCount} words</span>
@@ -621,7 +660,7 @@ export default function PipelinePage() {
                       ) : (
                         <div className="space-y-3">
                           {runs[pipelineId].slice(0, 5).map(run => (
-                            <div key={run.id} className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+                            <div key={run.id || run._id} className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
                               <div className="flex items-center justify-between mb-2">
                                 <div className="flex items-center gap-3">
                                   <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${getRunStatusColor(run.status)}`}>
@@ -639,18 +678,21 @@ export default function PipelinePage() {
                                 <div className="space-y-1 mt-2">
                                   {run.results.map((result, idx) => (
                                     <div key={idx} className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
-                                      {result.status === 'published' ? <CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" /> :
-                                       result.status === 'failed' ? <AlertCircle className="w-3.5 h-3.5 text-red-500 flex-shrink-0" /> :
-                                       <FileText className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />}
+                                      {getResultIcon(result.status)}
                                       <span className="truncate">{result.topic}</span>
-                                      {result.error && <span className="text-red-500 ml-auto flex-shrink-0">— {result.error}</span>}
+                                      {result.status === 'skipped' && (
+                                        <span className="text-yellow-500 ml-auto flex-shrink-0">duplicate</span>
+                                      )}
+                                      {result.error && result.status !== 'skipped' && (
+                                        <span className="text-red-500 ml-auto flex-shrink-0">— {result.error}</span>
+                                      )}
                                     </div>
                                   ))}
                                 </div>
                               )}
-                              {run.errors?.length > 0 && (
+                              {run.runErrors?.length > 0 && (
                                 <div className="mt-2 p-2 bg-red-50 dark:bg-red-900/20 rounded text-xs text-red-600 dark:text-red-400">
-                                  {run.errors.join('; ')}
+                                  {run.runErrors.join('; ')}
                                 </div>
                               )}
                             </div>
