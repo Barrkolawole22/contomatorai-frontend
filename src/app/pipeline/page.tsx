@@ -7,7 +7,7 @@ import { sitesAPI, pipelineAPI } from '@/lib/api';
 import {
   Zap, Plus, Play, Trash2, RefreshCw, AlertCircle, CheckCircle,
   Clock, Globe, Brain, ChevronDown, ChevronUp, X, Calendar,
-  BarChart3, Sparkles, Lock, TrendingUp, FileText, Send, Eye, Wand2, SkipForward, Tag
+  BarChart3, Sparkles, Lock, TrendingUp, FileText, Send, Eye, Wand2, SkipForward, Tag, Filter
 } from 'lucide-react';
 
 interface PipelineConfig {
@@ -17,6 +17,7 @@ interface PipelineConfig {
   isActive: boolean;
   schedule: 'hourly' | 'every_2_hours' | 'every_4_hours' | 'twice_daily' | 'three_daily' | 'daily' | 'weekly';
   niches: string[];
+  relevanceTopics: string[];
   targetWordCount: number;
   aiModel: 'gemini' | 'gemini-pro' | 'gpt4o' | 'claude';
   previewWindowMinutes: number;
@@ -67,6 +68,13 @@ const SCHEDULE_LABELS: Record<string, string> = {
   weekly:        'Weekly (Monday 8am)',
 };
 
+// Preset broad topic categories for the AI relevance filter
+const RELEVANCE_PRESETS = [
+  'Law & Courts', 'Crime', 'Finance', 'Health', 'Technology',
+  'Politics', 'Business', 'Sports', 'Environment', 'Education',
+  'Entertainment', 'Real Estate', 'Science', 'Military', 'Religion',
+];
+
 export default function PipelinePage() {
   const { user } = useAuth();
   const router = useRouter();
@@ -84,10 +92,12 @@ export default function PipelinePage() {
   const [detectingNiche, setDetectingNiche] = useState(false);
   const [nicheSuggestions, setNicheSuggestions] = useState<string[]>([]);
   const [nicheInput, setNicheInput] = useState('');
+  const [relevanceInput, setRelevanceInput] = useState('');
 
   const [form, setForm] = useState({
     siteId: '',
     niches: [] as string[],
+    relevanceTopics: [] as string[],
     schedule: 'every_4_hours' as PipelineConfig['schedule'],
     aiModel: 'gemini-pro' as PipelineConfig['aiModel'],
     targetWordCount: 1200,
@@ -142,23 +152,37 @@ export default function PipelinePage() {
     }
   };
 
-  // Niche tag management
+  // ── Niche helpers ──────────────────────────────────────────────────────────
   const addNiche = (value: string) => {
     const trimmed = value.trim();
     if (!trimmed || form.niches.includes(trimmed)) return;
     setForm(prev => ({ ...prev, niches: [...prev.niches, trimmed] }));
     setNicheInput('');
   };
-
-  const removeNiche = (niche: string) => {
+  const removeNiche = (niche: string) =>
     setForm(prev => ({ ...prev, niches: prev.niches.filter(n => n !== niche) }));
+  const handleNicheKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addNiche(nicheInput); }
   };
 
-  const handleNicheKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' || e.key === ',') {
-      e.preventDefault();
-      addNiche(nicheInput);
+  // ── Relevance topic helpers ────────────────────────────────────────────────
+  const addRelevanceTopic = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed || form.relevanceTopics.includes(trimmed)) return;
+    setForm(prev => ({ ...prev, relevanceTopics: [...prev.relevanceTopics, trimmed] }));
+    setRelevanceInput('');
+  };
+  const removeRelevanceTopic = (topic: string) =>
+    setForm(prev => ({ ...prev, relevanceTopics: prev.relevanceTopics.filter(t => t !== topic) }));
+  const togglePreset = (preset: string) => {
+    if (form.relevanceTopics.includes(preset)) {
+      removeRelevanceTopic(preset);
+    } else {
+      addRelevanceTopic(preset);
     }
+  };
+  const handleRelevanceKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addRelevanceTopic(relevanceInput); }
   };
 
   const handleDetectNiche = async () => {
@@ -170,11 +194,7 @@ export default function PipelinePage() {
       if (res.data.success && res.data.data.suggestions?.length > 0) {
         const suggestions = res.data.data.suggestions as string[];
         setNicheSuggestions(suggestions);
-        // Add all suggestions as niches (deduplicated)
-        setForm(prev => ({
-          ...prev,
-          niches: [...new Set([...prev.niches, ...suggestions])],
-        }));
+        setForm(prev => ({ ...prev, niches: [...new Set([...prev.niches, ...suggestions])] }));
       } else {
         setFormError('Could not detect niches from this site. Please enter them manually.');
       }
@@ -213,7 +233,8 @@ export default function PipelinePage() {
         setShowCreateForm(false);
         setNicheSuggestions([]);
         setNicheInput('');
-        setForm(prev => ({ ...prev, niches: [] }));
+        setRelevanceInput('');
+        setForm(prev => ({ ...prev, niches: [], relevanceTopics: [] }));
       } else {
         throw new Error(res.data.message || 'Failed to create pipeline');
       }
@@ -356,11 +377,12 @@ export default function PipelinePage() {
             <Sparkles className="w-5 h-5" /> How Autonomous Pipeline Works
           </h3>
           <p className="text-blue-100 text-sm max-w-2xl">
-            Each pipeline monitors multiple keyword niches, fetches the latest news (last 4 hours), generates complete articles with your chosen AI model, then previews or publishes directly to WordPress.
+            Each pipeline monitors multiple keyword niches, fetches the latest news, filters articles through an AI relevance gate, generates complete articles, then previews or publishes directly to WordPress.
           </p>
           <div className="flex items-center gap-2 mt-4 text-sm text-blue-100 flex-wrap">
             {[
-              { icon: TrendingUp, label: 'RSS Fetch (4h)' },
+              { icon: TrendingUp, label: 'RSS Fetch' },
+              { icon: Filter, label: 'AI Filter' },
               { icon: Brain, label: 'Scrape' },
               { icon: FileText, label: 'Generate' },
               { icon: Eye, label: 'Preview' },
@@ -381,7 +403,7 @@ export default function PipelinePage() {
           <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Create New Pipeline</h3>
-              <button onClick={() => { setShowCreateForm(false); setFormError(null); setNicheSuggestions([]); setNicheInput(''); }} className="text-gray-400 hover:text-gray-600">
+              <button onClick={() => { setShowCreateForm(false); setFormError(null); setNicheSuggestions([]); setNicheInput(''); setRelevanceInput(''); }} className="text-gray-400 hover:text-gray-600">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -423,13 +445,11 @@ export default function PipelinePage() {
                 </select>
               </div>
 
-              {/* Niches -- full width, tag input */}
+              {/* Niches -- full width */}
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Content Niches * <span className="font-normal text-gray-400">(add multiple keywords — press Enter or comma to add each)</span>
+                  Search Keywords * <span className="font-normal text-gray-400">(what to search for on Google News — press Enter or comma)</span>
                 </label>
-
-                {/* Tag display */}
                 {form.niches.length > 0 && (
                   <div className="flex flex-wrap gap-1.5 mb-2">
                     {form.niches.map(niche => (
@@ -443,7 +463,6 @@ export default function PipelinePage() {
                     ))}
                   </div>
                 )}
-
                 <div className="flex gap-2">
                   <input
                     type="text"
@@ -451,30 +470,84 @@ export default function PipelinePage() {
                     onChange={e => setNicheInput(e.target.value)}
                     onKeyDown={handleNicheKeyDown}
                     onBlur={() => { if (nicheInput.trim()) addNiche(nicheInput); }}
-                    placeholder='e.g. Nigeria court ruling, EFCC, Supreme Court Nigeria'
+                    placeholder='e.g. Nigeria court ruling, EFCC arrest, Supreme Court Nigeria'
                     className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
                   />
-                  <button
-                    type="button"
-                    onClick={() => addNiche(nicheInput)}
-                    disabled={!nicheInput.trim()}
-                    className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40 text-sm font-medium"
-                  >
-                    Add
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleDetectNiche}
-                    disabled={detectingNiche || !form.siteId}
-                    title="Auto-detect niches from your site"
-                    className="px-3 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 flex items-center gap-1.5 text-sm font-medium whitespace-nowrap"
-                  >
+                  <button type="button" onClick={() => addNiche(nicheInput)} disabled={!nicheInput.trim()} className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40 text-sm font-medium">Add</button>
+                  <button type="button" onClick={handleDetectNiche} disabled={detectingNiche || !form.siteId} className="px-3 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 flex items-center gap-1.5 text-sm font-medium whitespace-nowrap">
                     {detectingNiche ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
                     {detectingNiche ? 'Detecting...' : 'Auto-detect'}
                   </button>
                 </div>
-                <p className="text-xs text-gray-400 mt-1">Each keyword is searched separately on Google News. More keywords = more diverse articles per run.</p>
+                <p className="text-xs text-gray-400 mt-1">Each keyword is searched separately on news feeds. More keywords = more diverse articles per run.</p>
               </div>
+
+              {/* ── AI RELEVANCE FILTER ─────────────────────────────────────── */}
+              <div className="md:col-span-2">
+                <div className="border border-gray-200 dark:border-gray-700 rounded-xl p-4 bg-gray-50 dark:bg-gray-900/30">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Filter className="w-4 h-4 text-purple-500" />
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">AI Relevance Filter</label>
+                    <span className="text-xs px-2 py-0.5 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-full">Recommended</span>
+                  </div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                    Before generating any article, AI checks if it belongs to these broad topics. Articles that don't qualify are skipped automatically.
+                  </p>
+
+                  {/* Preset chips */}
+                  <div className="flex flex-wrap gap-1.5 mb-3">
+                    {RELEVANCE_PRESETS.map(preset => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => togglePreset(preset)}
+                        className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
+                          form.relevanceTopics.includes(preset)
+                            ? 'bg-purple-600 text-white border-purple-600'
+                            : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-300 dark:border-gray-600 hover:border-purple-400 hover:text-purple-600'
+                        }`}
+                      >
+                        {preset}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Selected topics */}
+                  {form.relevanceTopics.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mb-2">
+                      {form.relevanceTopics.map(topic => (
+                        <span key={topic} className="flex items-center gap-1 px-2.5 py-1 bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-700 rounded-full text-xs font-medium">
+                          {topic}
+                          <button type="button" onClick={() => removeRelevanceTopic(topic)} className="ml-0.5 hover:text-red-500">
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Custom topic input */}
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={relevanceInput}
+                      onChange={e => setRelevanceInput(e.target.value)}
+                      onKeyDown={handleRelevanceKeyDown}
+                      onBlur={() => { if (relevanceInput.trim()) addRelevanceTopic(relevanceInput); }}
+                      placeholder='Add custom topic (e.g. Nigerian Law, Crypto)'
+                      className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                    />
+                    <button type="button" onClick={() => addRelevanceTopic(relevanceInput)} disabled={!relevanceInput.trim()} className="px-3 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-40 text-sm font-medium">Add</button>
+                  </div>
+
+                  {form.relevanceTopics.length === 0 && (
+                    <p className="text-xs text-amber-600 dark:text-amber-400 mt-2 flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3" /> No filter set — all fetched articles will be generated. Select topics above to filter.
+                    </p>
+                  )}
+                </div>
+              </div>
+              {/* ─────────────────────────────────────────────────────────────── */}
 
               {/* AI Model */}
               <div>
@@ -544,7 +617,7 @@ export default function PipelinePage() {
 
             <div className="flex justify-end gap-3 mt-6">
               <button
-                onClick={() => { setShowCreateForm(false); setFormError(null); setNicheSuggestions([]); setNicheInput(''); }}
+                onClick={() => { setShowCreateForm(false); setFormError(null); setNicheSuggestions([]); setNicheInput(''); setRelevanceInput(''); }}
                 className="px-4 py-2 border border-gray-300 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700"
               >
                 Cancel
@@ -580,6 +653,7 @@ export default function PipelinePage() {
             {pipelines.map(pipeline => {
               const pipelineId = pipeline.id || pipeline._id;
               const niches = pipeline.niches || [];
+              const relevanceTopics = pipeline.relevanceTopics || [];
               return (
                 <div key={pipelineId} className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
                   <div className="p-5">
@@ -595,17 +669,23 @@ export default function PipelinePage() {
                         </button>
 
                         <div className="flex-1">
-                          {/* Niche tags */}
                           <div className="flex items-center gap-2 flex-wrap mb-1">
                             {niches.map(n => (
-                              <span key={n} className="text-xs px-2 py-0.5 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-700 rounded-full font-medium">
-                                {n}
-                              </span>
+                              <span key={n} className="text-xs px-2 py-0.5 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-700 rounded-full font-medium">{n}</span>
                             ))}
                             <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${pipeline.isActive ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'}`}>
                               {pipeline.isActive ? 'Active' : 'Paused'}
                             </span>
                           </div>
+                          {/* Relevance filter tags */}
+                          {relevanceTopics.length > 0 && (
+                            <div className="flex items-center gap-1.5 flex-wrap mt-1">
+                              <Filter className="w-3 h-3 text-purple-400 flex-shrink-0" />
+                              {relevanceTopics.map(t => (
+                                <span key={t} className="text-xs px-2 py-0.5 bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-300 border border-purple-200 dark:border-purple-700 rounded-full">{t}</span>
+                              ))}
+                            </div>
+                          )}
                           <div className="flex items-center gap-4 mt-2 text-sm text-gray-500 dark:text-gray-400 flex-wrap">
                             <span className="flex items-center gap-1"><Globe className="w-3.5 h-3.5" />{getSiteName(pipeline.siteId)}</span>
                             <span className="flex items-center gap-1"><Calendar className="w-3.5 h-3.5" />{SCHEDULE_LABELS[pipeline.schedule]}</span>
@@ -623,22 +703,14 @@ export default function PipelinePage() {
                       </div>
 
                       <div className="flex items-center gap-2 ml-4 flex-shrink-0">
-                        <button
-                          onClick={() => handleTrigger(pipelineId)}
-                          disabled={triggeringId === pipelineId}
-                          className="px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5 text-sm font-medium"
-                        >
+                        <button onClick={() => handleTrigger(pipelineId)} disabled={triggeringId === pipelineId} className="px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5 text-sm font-medium">
                           {triggeringId === pipelineId ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
                           Run Now
                         </button>
                         <button onClick={() => handleToggleExpand(pipelineId)} className="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
                           {expandedPipeline === pipelineId ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                         </button>
-                        <button
-                          onClick={() => handleDelete(pipelineId)}
-                          disabled={deletingId === pipelineId}
-                          className="p-1.5 text-red-400 hover:text-red-600 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50"
-                        >
+                        <button onClick={() => handleDelete(pipelineId)} disabled={deletingId === pipelineId} className="p-1.5 text-red-400 hover:text-red-600 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50">
                           {deletingId === pipelineId ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
                         </button>
                       </div>
@@ -681,7 +753,7 @@ export default function PipelinePage() {
                                       {getResultIcon(result.status)}
                                       <span className="truncate">{result.topic}</span>
                                       {result.status === 'skipped' && (
-                                        <span className="text-yellow-500 ml-auto flex-shrink-0">duplicate</span>
+                                        <span className="text-yellow-500 ml-auto flex-shrink-0 truncate max-w-xs">{result.error || 'skipped'}</span>
                                       )}
                                       {result.error && result.status !== 'skipped' && (
                                         <span className="text-red-500 ml-auto flex-shrink-0">— {result.error}</span>
