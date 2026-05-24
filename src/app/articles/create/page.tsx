@@ -111,7 +111,7 @@ interface EnhancedGenerationSettings {
   includeInternalLinks: boolean;
   internalLinkDensity: number;
   maxInternalLinks: number;
-  selectedDocIds: string[]; // knowledgebase docs
+  selectedDocIds: string[];
   includeExternalLinks: boolean;
 }
 
@@ -264,12 +264,18 @@ export default function EnhancedCreateArticlePage() {
     }
   };
 
+  // ── Knowledgebase: normalise _id → id at load time so all downstream
+  //    references can safely use doc.id without casting.
   const loadKnowledgeDocs = async () => {
     try {
       setLoadingKnowledgeDocs(true);
       const response = await knowledgebaseAPI.getDocuments();
       if (response.data.success) {
-        setKnowledgeDocs(response.data.data || []);
+        const docs = (response.data.data || []).map((d: any) => ({
+          ...d,
+          id: d._id?.toString() || d.id,
+        }));
+        setKnowledgeDocs(docs);
       }
     } catch (error) {
       console.error('Error loading knowledge docs:', error);
@@ -441,10 +447,9 @@ export default function EnhancedCreateArticlePage() {
     }, 8000);
     
     try {
-      // FIX: Do NOT build context from doc.description here.
-      // selectedDocIds are passed to the backend which performs proper
-      // vector RAG retrieval via knowledgebaseService.retrieveContext().
-      // Only merge user-typed context and scraped text as additionalContext.
+      // selectedDocIds are passed to the backend which extracts and injects
+      // the full text of each document directly into the AI prompt as context.
+      // Only merge user-typed context and scraped text as additionalContext here.
       const enhancedOptions = {
         tone: settings.tone,
         wordCount: settings.wordCount,
@@ -637,6 +642,11 @@ export default function EnhancedCreateArticlePage() {
     if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours ago`;
     return date.toLocaleString();
   };
+
+  // Derive total words for selected knowledgebase docs to show a context-size hint
+  const selectedDocsWordCount = knowledgeDocs
+    .filter(doc => settings.selectedDocIds.includes(doc.id))
+    .reduce((sum, doc) => sum + ((doc as any).totalWords || 0), 0);
 
   return (
     <DashboardLayout>
@@ -921,37 +931,62 @@ export default function EnhancedCreateArticlePage() {
                 Knowledgebase Context
               </h3>
               <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                Select documents from your knowledgebase. The backend will retrieve the most relevant excerpts using semantic search.
+                Select documents from your knowledgebase. The full text of each selected document will be injected directly into the AI prompt as context.
               </p>
               {loadingKnowledgeDocs ? (
                 <div className="text-sm text-gray-500">Loading knowledgebase documents...</div>
               ) : knowledgeDocs.length === 0 ? (
                 <div className="text-sm text-gray-500">No documents in your knowledgebase yet.</div>
               ) : (
-                <div className="max-h-48 overflow-y-auto border border-gray-300 dark:border-gray-600 rounded-lg p-3 bg-white dark:bg-gray-700 space-y-2">
-                  {knowledgeDocs.map(doc => (
-                    <label key={doc.id} className="flex items-center gap-2 py-1 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={settings.selectedDocIds.includes(doc.id)}
-                        onChange={(e) => {
-                          const current = settings.selectedDocIds;
-                          const updated = e.target.checked
-                            ? [...current, doc.id]
-                            : current.filter(id => id !== doc.id);
-                          setSettings(prev => ({ ...prev, selectedDocIds: updated }));
-                        }}
-                        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                      />
-                      <span className="text-gray-800 dark:text-gray-200">{doc.title}</span>
-                      <span className={`ml-auto text-xs px-2 py-0.5 rounded-full ${
-                        doc.status === 'ready' ? 'bg-green-100 text-green-700' :
-                        doc.status === 'processing' ? 'bg-yellow-100 text-yellow-700' :
-                        'bg-red-100 text-red-700'
-                      }`}>{doc.status}</span>
-                    </label>
-                  ))}
-                </div>
+                <>
+                  <div className="max-h-48 overflow-y-auto border border-gray-300 dark:border-gray-600 rounded-lg p-3 bg-white dark:bg-gray-700 space-y-2">
+                    {knowledgeDocs.map(doc => {
+                      const isChecked = settings.selectedDocIds.includes(doc.id);
+                      return (
+                        <label
+                          key={doc.id}
+                          className="flex items-center gap-2 py-1 text-sm cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => {
+                              const updated = e.target.checked
+                                ? [...settings.selectedDocIds, doc.id]
+                                : settings.selectedDocIds.filter(id => id !== doc.id);
+                              setSettings(prev => ({ ...prev, selectedDocIds: updated }));
+                            }}
+                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          <span className="text-gray-800 dark:text-gray-200 flex-1">{doc.title}</span>
+                          {(doc as any).totalWords > 0 && (
+                            <span className="text-xs text-gray-400 dark:text-gray-500">
+                              {(doc as any).totalWords.toLocaleString()} words
+                            </span>
+                          )}
+                          <span className={`text-xs px-2 py-0.5 rounded-full ${
+                            doc.status === 'ready' ? 'bg-green-100 text-green-700' :
+                            doc.status === 'processing' ? 'bg-yellow-100 text-yellow-700' :
+                            'bg-red-100 text-red-700'
+                          }`}>{doc.status}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+
+                  {/* Context size hint */}
+                  {settings.selectedDocIds.length > 0 && (
+                    <div className={`mt-2 text-xs px-3 py-2 rounded-lg ${
+                      selectedDocsWordCount > 8000
+                        ? 'bg-yellow-50 text-yellow-700 dark:bg-yellow-900/20 dark:text-yellow-300'
+                        : 'bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300'
+                    }`}>
+                      {selectedDocsWordCount > 0
+                        ? `~${selectedDocsWordCount.toLocaleString()} words selected for context injection${selectedDocsWordCount > 8000 ? ' — large context may increase generation time' : ''}`
+                        : `${settings.selectedDocIds.length} doc${settings.selectedDocIds.length !== 1 ? 's' : ''} selected`}
+                    </div>
+                  )}
+                </>
               )}
             </div>
 
@@ -1558,7 +1593,7 @@ export default function EnhancedCreateArticlePage() {
                   <div className="text-2xl font-bold text-gray-900 dark:text-white mb-1">
                     {generatedContent.readingTime}
                   </div>
-                  <div className="text-sm text-gray-600 dark:text-gray-400">Min Read</div>
+                  <div className="text-sm text-gray-600 dark:text-gray:400">Min Read</div>
                 </div>
                 <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4">
                   <div className="text-2xl font-bold text-gray-900 dark:text-white mb-1">

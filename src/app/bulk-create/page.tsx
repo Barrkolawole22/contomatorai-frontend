@@ -48,13 +48,13 @@ export default function BulkCreatePage() {
 
   // ---------- Common state ----------
   const [selectedSite, setSelectedSite] = useState('');
- const [selectedModel, setSelectedModel] = useState<'gemini' | 'gemini-pro' | 'gpt4o' | 'claude'>('gemini');
+  const [selectedModel, setSelectedModel] = useState<'gemini' | 'gemini-pro' | 'gpt4o' | 'claude'>('gemini');
   const [wordCount, setWordCount] = useState(1500);
   const [tone, setTone] = useState<'professional' | 'casual' | 'friendly' | 'authoritative'>('professional');
   const [includeInternalLinks, setIncludeInternalLinks] = useState(true);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
-  // --- New advanced settings ---
+  // --- Advanced settings ---
   const [writingStyle, setWritingStyle] = useState<'conversational' | 'academic' | 'journalistic' | 'technical' | 'creative'>('conversational');
   const [contentIntent, setContentIntent] = useState<'informational' | 'navigational' | 'commercial' | 'transactional'>('informational');
   const [seoFocus, setSeoFocus] = useState<'primary_keyword' | 'semantic_keywords' | 'long_tail' | 'balanced'>('balanced');
@@ -68,7 +68,6 @@ export default function BulkCreatePage() {
   const [targetKeywordDensity, setTargetKeywordDensity] = useState(1.5);
   const [internalLinkDensity, setInternalLinkDensity] = useState(3);
   const [maxInternalLinks, setMaxInternalLinks] = useState(5);
-  // --- end new advanced settings ---
 
   const [availableSites, setAvailableSites] = useState<Site[]>([]);
   const [loadingSites, setLoadingSites] = useState(true);
@@ -82,7 +81,7 @@ export default function BulkCreatePage() {
   const [loadingDocs, setLoadingDocs] = useState(false);
   const [expandedEntries, setExpandedEntries] = useState<Set<number>>(new Set());
 
-  // ---------- Input mode (manual / csv) ----------
+  // ---------- Input mode ----------
   const [inputMode, setInputMode] = useState<InputMode>('manual');
 
   // ---------- Manual entries ----------
@@ -131,12 +130,18 @@ export default function BulkCreatePage() {
     }
   };
 
+  // Normalise _id → id at load time so doc.id is always a real string
+  // and checkbox includes() checks work correctly per entry.
   const loadKnowledgeDocs = async () => {
     try {
       setLoadingDocs(true);
       const response = await knowledgebaseAPI.getDocuments();
       if (response.data.success) {
-        setKnowledgeDocs(response.data.data || []);
+        const docs = (response.data.data || []).map((d: any) => ({
+          ...d,
+          id: d._id?.toString() || d.id,
+        }));
+        setKnowledgeDocs(docs);
       }
     } catch (error) {
       console.error('Error loading knowledge docs:', error);
@@ -230,7 +235,7 @@ export default function BulkCreatePage() {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  // ---------- Common submission ----------
+  // ---------- Submission ----------
   const handleBulkGenerate = async () => {
     try {
       setError(null);
@@ -282,7 +287,6 @@ export default function BulkCreatePage() {
 
       setLoading(true);
 
-      // Build the options object with all new settings
       const options = {
         siteId: selectedSite,
         model: selectedModel,
@@ -398,7 +402,7 @@ export default function BulkCreatePage() {
           </div>
         )}
 
-        {/* Main Settings (shared) */}
+        {/* Generation Settings */}
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6 space-y-6">
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Generation Settings</h3>
 
@@ -457,7 +461,7 @@ export default function BulkCreatePage() {
             </div>
           </div>
 
-          {/* Advanced Settings (now fully expanded with all options) */}
+          {/* Advanced Settings */}
           <div>
             <button
               onClick={() => setShowAdvanced(!showAdvanced)}
@@ -471,7 +475,7 @@ export default function BulkCreatePage() {
               <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Tone</label>
-                  <select value={tone} onChange={(e) => setTone(e.target.value as 'professional' | 'casual' | 'friendly' | 'authoritative')} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                  <select value={tone} onChange={(e) => setTone(e.target.value as any)} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
                     <option value="professional">Professional</option>
                     <option value="casual">Casual</option>
                     <option value="friendly">Friendly</option>
@@ -480,7 +484,7 @@ export default function BulkCreatePage() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Writing Style</label>
-                  <select value={writingStyle} onChange={(e) => setWritingStyle(e.target.value as 'conversational' | 'academic' | 'journalistic' | 'technical' | 'creative')} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                  <select value={writingStyle} onChange={(e) => setWritingStyle(e.target.value as any)} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
                     <option value="conversational">Conversational</option>
                     <option value="academic">Academic</option>
                     <option value="journalistic">Journalistic</option>
@@ -490,7 +494,7 @@ export default function BulkCreatePage() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Content Intent</label>
-                  <select value={contentIntent} onChange={(e) => setContentIntent(e.target.value as 'informational' | 'navigational' | 'commercial' | 'transactional')} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                  <select value={contentIntent} onChange={(e) => setContentIntent(e.target.value as any)} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
                     <option value="informational">Informational</option>
                     <option value="navigational">Navigational</option>
                     <option value="commercial">Commercial</option>
@@ -499,7 +503,7 @@ export default function BulkCreatePage() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">SEO Focus</label>
-                  <select value={seoFocus} onChange={(e) => setSeoFocus(e.target.value as 'primary_keyword' | 'semantic_keywords' | 'long_tail' | 'balanced')} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                  <select value={seoFocus} onChange={(e) => setSeoFocus(e.target.value as any)} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
                     <option value="balanced">Balanced SEO</option>
                     <option value="primary_keyword">Primary Keyword Focus</option>
                     <option value="semantic_keywords">Semantic Keywords</option>
@@ -511,7 +515,6 @@ export default function BulkCreatePage() {
                   <input type="text" value={callToAction} onChange={(e) => setCallToAction(e.target.value)} placeholder="e.g., Contact us for a free consultation" className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
                 </div>
 
-                {/* Content feature checkboxes */}
                 <div className="col-span-2">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Content Features</label>
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
@@ -571,7 +574,7 @@ export default function BulkCreatePage() {
           </div>
         </div>
 
-        {/* ---- INPUT MODE TABS ---- */}
+        {/* Input mode tabs */}
         <div className="flex border-b border-gray-200 dark:border-gray-700">
           <button
             onClick={() => { setInputMode('manual'); setError(null); }}
@@ -596,7 +599,7 @@ export default function BulkCreatePage() {
           </button>
         </div>
 
-        {/* ---- MANUAL ENTRY PANEL (unchanged except for internal link fields removed, already handled globally) ---- */}
+        {/* Manual Entry Panel */}
         {inputMode === 'manual' && (
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6 space-y-4">
             <div className="flex items-center justify-between">
@@ -677,32 +680,37 @@ export default function BulkCreatePage() {
                               <BookOpen className="w-4 h-4 inline mr-1" />
                               Source Documents
                             </label>
-                            {knowledgeDocs.length === 0 ? (
+                            {loadingDocs ? (
+                              <p className="text-xs text-gray-500">Loading documents...</p>
+                            ) : knowledgeDocs.length === 0 ? (
                               <p className="text-xs text-gray-500">No knowledgebase documents available.</p>
                             ) : (
                               <div className="max-h-32 overflow-y-auto border border-gray-300 dark:border-gray-600 rounded-lg p-2 bg-white dark:bg-gray-700">
-                                {knowledgeDocs.map(doc => (
-                                  <label key={doc.id} className="flex items-center gap-2 py-1 text-sm">
-                                    <input
-                                      type="checkbox"
-                                      checked={entry.docIds?.includes(doc.id) || false}
-                                      onChange={(e) => {
-                                        const current = entry.docIds || [];
-                                        const updated = e.target.checked
-                                          ? [...current, doc.id]
-                                          : current.filter(id => id !== doc.id);
-                                        updateEntry(index, 'docIds', updated);
-                                      }}
-                                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                                    />
-                                    <span className="text-gray-800 dark:text-gray-200">{doc.title}</span>
-                                    <span className={`ml-auto text-xs px-2 py-0.5 rounded-full ${
-                                      doc.status === 'ready' ? 'bg-green-100 text-green-700' :
-                                      doc.status === 'processing' ? 'bg-yellow-100 text-yellow-700' :
-                                      'bg-red-100 text-red-700'
-                                    }`}>{doc.status}</span>
-                                  </label>
-                                ))}
+                                {knowledgeDocs.map(doc => {
+                                  const isChecked = entry.docIds?.includes(doc.id) || false;
+                                  return (
+                                    <label key={doc.id} className="flex items-center gap-2 py-1 text-sm cursor-pointer">
+                                      <input
+                                        type="checkbox"
+                                        checked={isChecked}
+                                        onChange={(e) => {
+                                          const current = entry.docIds || [];
+                                          const updated = e.target.checked
+                                            ? [...current, doc.id]
+                                            : current.filter(id => id !== doc.id);
+                                          updateEntry(index, 'docIds', updated);
+                                        }}
+                                        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                      />
+                                      <span className="text-gray-800 dark:text-gray-200 flex-1">{doc.title}</span>
+                                      <span className={`ml-auto text-xs px-2 py-0.5 rounded-full ${
+                                        doc.status === 'ready' ? 'bg-green-100 text-green-700' :
+                                        doc.status === 'processing' ? 'bg-yellow-100 text-yellow-700' :
+                                        'bg-red-100 text-red-700'
+                                      }`}>{doc.status}</span>
+                                    </label>
+                                  );
+                                })}
                               </div>
                             )}
                           </div>
@@ -752,7 +760,7 @@ export default function BulkCreatePage() {
           </div>
         )}
 
-        {/* ---- CSV UPLOAD PANEL (unchanged) ---- */}
+        {/* CSV Upload Panel */}
         {inputMode === 'csv' && (
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6 space-y-4">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
@@ -818,7 +826,7 @@ export default function BulkCreatePage() {
                           <td className="px-3 py-2 whitespace-nowrap text-gray-500">{row.doc_ids || '-'}</td>
                           <td className="px-3 py-2 whitespace-nowrap text-gray-500">
                             {row.dos && <span className="text-green-600">Do</span>}
-                            {row.donts && (row.dos ? ' / ' : '') + ''}
+                            {row.donts && row.dos && ' / '}
                             {row.donts && <span className="text-red-600">Don't</span>}
                             {!row.dos && !row.donts && '-'}
                           </td>
@@ -865,7 +873,7 @@ export default function BulkCreatePage() {
           </button>
         </div>
 
-        {/* Results Display */}
+        {/* Results */}
         {results && (
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6 space-y-6">
             <h3 className="text-xl font-bold text-gray-900 dark:text-white">

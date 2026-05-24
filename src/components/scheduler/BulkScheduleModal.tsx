@@ -54,36 +54,39 @@ export default function BulkScheduleModal({
     notifyOnPublish: true
   });
 
+  // FIX 2: include filters in dependency array so loadData re-runs on filter change
   useEffect(() => {
     if (isOpen) {
       loadData();
     }
-  }, [isOpen]);
+  }, [isOpen, filters]);
 
   const loadData = async () => {
     try {
       setLoadingData(true);
 
-      // Load sites
       const sitesResponse = await sitesAPI.getUserSites();
       if (sitesResponse.data.success) {
         const sitesData = sitesResponse.data.data || [];
         setSites(sitesData);
         
-        // Auto-select first site if none selected
         if (!formData.siteId && sitesData.length > 0) {
           setFormData(prev => ({ ...prev, siteId: sitesData[0].id }));
         }
       }
 
-      // Load draft articles
       const articlesResponse = await contentAPI.getContent({
         status: filters.status !== 'all' ? filters.status : undefined,
         limit: 100
       });
 
       if (articlesResponse.data.success) {
-        setArticles(articlesResponse.data.data || []);
+        // FIX 1: normalise _id -> id so selection logic never operates on undefined
+        const normalised = (articlesResponse.data.data || []).map((a: any) => ({
+          ...a,
+          id: a._id?.toString() || a.id,
+        }));
+        setArticles(normalised);
       }
 
     } catch (err: any) {
@@ -112,7 +115,6 @@ export default function BulkScheduleModal({
       return;
     }
 
-    // Validate date is in the future
     const scheduledDateTime = new Date(`${formData.scheduledDate}T${formData.scheduledTime}`);
     if (scheduledDateTime <= new Date()) {
       setError('Scheduled time must be in the future');
@@ -125,20 +127,18 @@ export default function BulkScheduleModal({
 
       const scheduledFor = new Date(`${formData.scheduledDate}T${formData.scheduledTime}`).toISOString();
       
-      // Process each article sequentially to avoid overwhelming the API
       for (const contentId of selectedContentIds) {
         try {
           await schedulerAPI.schedulePost({
             contentId: contentId,
             siteId: formData.siteId,
-            scheduledFor: scheduledFor, // This will work with the backend
+            scheduledFor: scheduledFor,
             timezone: formData.timezone,
             autoPublish: formData.autoPublish,
             notifyOnPublish: formData.notifyOnPublish
           });
         } catch (error) {
           console.error(`Error scheduling content ID ${contentId}:`, error);
-          // Continue with other articles even if one fails
         }
       }
       
@@ -176,7 +176,6 @@ export default function BulkScheduleModal({
   const filteredArticles = articles.filter(article => {
     const matchesSearch = article.title.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = filters.status === 'all' || article.status === filters.status;
-    
     return matchesSearch && matchesStatus;
   }).sort((a, b) => {
     switch (filters.sortBy) {
@@ -233,7 +232,6 @@ export default function BulkScheduleModal({
                   Select Articles to Schedule
                 </h4>
 
-                {/* Article search and filters */}
                 <div className="flex items-center gap-2 mb-2">
                   <div className="relative flex-1">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -257,7 +255,6 @@ export default function BulkScheduleModal({
                   </select>
                 </div>
 
-                {/* Articles list */}
                 <div className="border border-gray-200 dark:border-gray-700 rounded-lg max-h-80 overflow-y-auto">
                   {loadingData ? (
                     <div className="p-4 text-center">
@@ -437,7 +434,6 @@ export default function BulkScheduleModal({
                   </label>
                 </div>
 
-                {/* Preview */}
                 {formData.scheduledDate && formData.scheduledTime && (
                   <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 mt-4">
                     <div className="flex items-start">
@@ -469,7 +465,6 @@ export default function BulkScheduleModal({
               </div>
             </div>
 
-            {/* Footer */}
             <div className="flex items-center justify-end space-x-3 mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
               <button
                 type="button"
