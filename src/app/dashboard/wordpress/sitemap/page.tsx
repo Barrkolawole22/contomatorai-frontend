@@ -1,16 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/context/AuthProvider';
 import { sitemapAPI, sitesAPI } from '@/lib/api';
 import DashboardLayout from '@/components/layout/DashboardLayout';
-import Link from 'next/link';
 import {
-  Globe,
   Plus,
   Search,
   Filter,
-  Eye,
   Edit3,
   Trash2,
   RefreshCw,
@@ -21,9 +18,9 @@ import {
   XCircle,
   Link2,
   ExternalLink,
-  BarChart3,
   Upload,
-  Download
+  Activity,
+  Terminal
 } from 'lucide-react';
 
 interface IndexedUrl {
@@ -56,6 +53,12 @@ interface FilterOptions {
   sortOrder: 'asc' | 'desc';
 }
 
+interface CrawlProgress {
+  status: string;
+  urlsFound: number;
+  currentUrl: string;
+}
+
 export default function SitemapPage() {
   const { user } = useAuth();
   const [indexedUrls, setIndexedUrls] = useState<IndexedUrl[]>([]);
@@ -72,11 +75,22 @@ export default function SitemapPage() {
   const [showFilters, setShowFilters] = useState(false);
   const [selectedUrls, setSelectedUrls] = useState<string[]>([]);
   const [showAddUrlModal, setShowAddUrlModal] = useState(false);
+  const [stats, setStats] = useState<any>(null);
+  const [addUrlLoading, setAddUrlLoading] = useState(false);
+
+  // Real-time crawl state
   const [crawlingInProgress, setCrawlingInProgress] = useState(false);
   const [crawlSiteId, setCrawlSiteId] = useState<string | null>(null);
-  const [stats, setStats] = useState<any>(null);
-  
-  // New URL form data
+  const [crawlProgress, setCrawlProgress] = useState<CrawlProgress>({
+    status: '',
+    urlsFound: 0,
+    currentUrl: ''
+  });
+
+  // ✅ NEW: accumulate discovered URLs in real time
+  const [discoveredUrls, setDiscoveredUrls] = useState<string[]>([]);
+  const feedScrollRef = useRef<HTMLDivElement>(null);
+
   const [newUrlData, setNewUrlData] = useState({
     url: '',
     title: '',
@@ -84,6 +98,13 @@ export default function SitemapPage() {
     keywords: '',
     siteId: ''
   });
+
+  // ✅ Auto-scroll the live feed to the bottom whenever a new URL arrives
+  useEffect(() => {
+    if (feedScrollRef.current) {
+      feedScrollRef.current.scrollTop = feedScrollRef.current.scrollHeight;
+    }
+  }, [discoveredUrls]);
 
   useEffect(() => {
     loadData();
@@ -94,30 +115,24 @@ export default function SitemapPage() {
       setLoading(true);
       setError(null);
 
-      // Load sites
       const sitesResponse = await sitesAPI.getUserSites();
       if (sitesResponse.data.success) {
         setSites(sitesResponse.data.data || []);
-        
-        // Auto-select first site if none selected
         if (filters.siteId === 'all' && sitesResponse.data.data.length > 0) {
           setFilters(prev => ({ ...prev, siteId: sitesResponse.data.data[0].id }));
           setNewUrlData(prev => ({ ...prev, siteId: sitesResponse.data.data[0].id }));
         }
       }
 
-      // Load indexed URLs
       if (filters.siteId !== 'all') {
         const urlsResponse = await sitemapAPI.getIndexedUrls({
           siteId: filters.siteId,
           status: filters.status !== 'all' ? filters.status : undefined
         });
-
         if (urlsResponse.data.success) {
           setIndexedUrls(urlsResponse.data.data || []);
         }
 
-        // Load sitemap stats
         const statsResponse = await sitemapAPI.getStats(filters.siteId);
         if (statsResponse.data.success) {
           setStats(statsResponse.data.data);
@@ -126,7 +141,6 @@ export default function SitemapPage() {
         setIndexedUrls([]);
         setStats(null);
       }
-
     } catch (err) {
       console.error('Error loading sitemap data:', err);
       setError('Failed to load sitemap data');
@@ -135,38 +149,68 @@ export default function SitemapPage() {
     }
   };
 
-  const handleCrawlSitemap = async (siteId: string) => {
-    if (!confirm('Start crawling the sitemap? This might take a few minutes for large sites.')) {
-      return;
-    }
+  const handleCrawlSitemap = (siteId: string) => {
+    if (!confirm('Start crawling the sitemap? This might take a few minutes for large sites.')) return;
 
-    try {
-      setCrawlingInProgress(true);
-      setCrawlSiteId(siteId);
+    setCrawlingInProgress(true);
+    setCrawlSiteId(siteId);
 
-      const response = await sitemapAPI.crawlSitemap(siteId);
-      
-      if (response.data.success) {
-        alert(`Successfully crawled sitemap. ${response.data.data} URLs indexed.`);
-        loadData();
+    // ✅ Reset the live feed for this new crawl
+    setDiscoveredUrls([]);
+    setCrawlProgress({ status: 'Connecting to crawler...', urlsFound: 0, currentUrl: '' });
+
+    const token = localStorage.getItem('token') || '';
+    const streamUrl = `${process.env.NEXT_PUBLIC_API_URL || ''}/api/sitemap/crawl/stream?siteId=${siteId}&token=${token}`;
+    const eventSource = new EventSource(streamUrl);
+
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+
+        if (data.type === 'progress') {
+          setCrawlProgress({
+            status: 'Discovering URLs...',
+            urlsFound: data.urlsFound,
+            currentUrl: data.currentUrl
+          });
+
+          // ✅ Accumulate each discovered URL into the live feed list
+          if (data.currentUrl) {
+            setDiscoveredUrls(prev => [...prev, data.currentUrl]);
+          }
+        } else if (data.type === 'complete') {
+          eventSource.close();
+          setCrawlingInProgress(false);
+          setCrawlSiteId(null);
+          setCrawlProgress(prev => ({
+            ...prev,
+            status: 'Complete',
+            urlsFound: data.urlsFound
+          }));
+          alert(`Successfully crawled sitemap. ${data.urlsFound} URLs indexed.`);
+          loadData();
+        } else if (data.type === 'error') {
+          eventSource.close();
+          throw new Error(data.message);
+        }
+      } catch (err) {
+        console.error('Error parsing SSE data:', err);
       }
-    } catch (err) {
-      console.error('Error crawling sitemap:', err);
-      alert('Failed to crawl sitemap');
-    } finally {
+    };
+
+    eventSource.onerror = (err) => {
+      console.error('EventSource connection error:', err);
+      eventSource.close();
       setCrawlingInProgress(false);
       setCrawlSiteId(null);
-    }
+      alert('Connection lost during sitemap crawl. Check the network tab or ensure your token is valid.');
+    };
   };
 
   const handleDeleteUrl = async (urlId: string) => {
-    if (!confirm('Are you sure you want to delete this URL? This action cannot be undone.')) {
-      return;
-    }
-
+    if (!confirm('Are you sure you want to delete this URL?')) return;
     try {
       const response = await sitemapAPI.deleteUrl(urlId);
-      
       if (response.data.success) {
         setIndexedUrls(prev => prev.filter(url => url.id !== urlId));
         setSelectedUrls(prev => prev.filter(id => id !== urlId));
@@ -180,81 +224,52 @@ export default function SitemapPage() {
   };
 
   const handleBulkDelete = async () => {
-    if (!confirm(`Are you sure you want to delete ${selectedUrls.length} URLs? This action cannot be undone.`)) {
-      return;
-    }
-
+    if (!confirm(`Delete ${selectedUrls.length} URLs? This cannot be undone.`)) return;
     try {
-      const response = await sitemapAPI.bulkUpdate({
-        urlIds: selectedUrls,
-        action: 'delete'
-      });
-      
+      const response = await sitemapAPI.bulkUpdate({ urlIds: selectedUrls, action: 'delete' });
       if (response.data.success) {
         setIndexedUrls(prev => prev.filter(url => !selectedUrls.includes(url.id)));
         setSelectedUrls([]);
-        alert('URLs deleted successfully');
       }
     } catch (err) {
       console.error('Error bulk deleting URLs:', err);
-      alert('Failed to delete some URLs. Please try again.');
+      alert('Failed to delete some URLs.');
     }
   };
 
   const handleBulkToggleStatus = async (action: 'activate' | 'deactivate') => {
-    if (!confirm(`Are you sure you want to ${action === 'activate' ? 'activate' : 'deactivate'} ${selectedUrls.length} URLs?`)) {
-      return;
-    }
-
+    if (!confirm(`${action === 'activate' ? 'Activate' : 'Deactivate'} ${selectedUrls.length} URLs?`)) return;
     try {
-      const response = await sitemapAPI.bulkUpdate({
-        urlIds: selectedUrls,
-        action
-      });
-      
+      const response = await sitemapAPI.bulkUpdate({ urlIds: selectedUrls, action });
       if (response.data.success) {
-        await loadData(); // Reload data to get updated statuses
+        await loadData();
         setSelectedUrls([]);
-        alert(`URLs ${action === 'activate' ? 'activated' : 'deactivated'} successfully`);
       }
     } catch (err) {
       console.error(`Error bulk ${action}:`, err);
-      alert(`Failed to ${action} URLs. Please try again.`);
+      alert(`Failed to ${action} URLs.`);
     }
   };
 
   const handleAddUrl = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!newUrlData.url) {
-      alert('URL is required');
-      return;
-    }
-
-    if (!newUrlData.siteId) {
-      alert('Please select a site');
-      return;
-    }
+    if (!newUrlData.url) { alert('URL is required'); return; }
+    if (!newUrlData.siteId) { alert('Please select a site'); return; }
 
     try {
-      // Not implemented in your API yet - you'll need to add this endpoint
-      const response = await fetch('/api/sitemap/add-url', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({
-          url: newUrlData.url,
-          title: newUrlData.title,
-          description: newUrlData.description,
-          keywords: newUrlData.keywords.split(',').map(k => k.trim()),
-          siteId: newUrlData.siteId
-        })
-      }).then(res => res.json());
-      
-      if (response.success) {
-        loadData();
+      setAddUrlLoading(true);
+      const response = await sitemapAPI.addUrl({
+        siteId: newUrlData.siteId,
+        url: newUrlData.url,
+        title: newUrlData.title || undefined,
+        description: newUrlData.description || undefined,
+        keywords: newUrlData.keywords
+          ? newUrlData.keywords.split(',').map(k => k.trim()).filter(Boolean)
+          : undefined
+      });
+
+      if (response.data.success) {
+        await loadData();
         setShowAddUrlModal(false);
         setNewUrlData({
           url: '',
@@ -264,100 +279,66 @@ export default function SitemapPage() {
           siteId: filters.siteId !== 'all' ? filters.siteId : ''
         });
       } else {
-        throw new Error(response.message || 'Failed to add URL');
+        throw new Error(response.data.message || 'Failed to add URL');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error adding URL:', err);
-      alert('Failed to add URL');
+      alert(err.response?.data?.message || err.message || 'Failed to add URL');
+    } finally {
+      setAddUrlLoading(false);
     }
   };
 
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case 'active':
-        return <CheckCircle className="w-4 h-4 text-green-600" />;
-      case 'inactive':
-        return <XCircle className="w-4 h-4 text-gray-600" />;
-      case 'error':
-        return <AlertCircle className="w-4 h-4 text-red-600" />;
-      default:
-        return <AlertCircle className="w-4 h-4 text-gray-600" />;
+      case 'active':   return <CheckCircle className="w-4 h-4 text-green-600" />;
+      case 'inactive': return <XCircle className="w-4 h-4 text-gray-600" />;
+      default:         return <AlertCircle className="w-4 h-4 text-red-600" />;
     }
   };
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'active':
-        return 'text-green-700 bg-green-50 border-green-200 dark:text-green-400 dark:bg-green-900/20 dark:border-green-800';
-      case 'inactive':
-        return 'text-gray-700 bg-gray-50 border-gray-200 dark:text-gray-400 dark:bg-gray-900/20 dark:border-gray-800';
-      case 'error':
-        return 'text-red-700 bg-red-50 border-red-200 dark:text-red-400 dark:bg-red-900/20 dark:border-red-800';
-      default:
-        return 'text-gray-700 bg-gray-50 border-gray-200 dark:text-gray-400 dark:bg-gray-900/20 dark:border-gray-800';
+      case 'active':   return 'text-green-700 bg-green-50 border-green-200 dark:text-green-400 dark:bg-green-900/20 dark:border-green-800';
+      case 'inactive': return 'text-gray-700 bg-gray-50 border-gray-200 dark:text-gray-400 dark:bg-gray-900/20 dark:border-gray-800';
+      default:         return 'text-red-700 bg-red-50 border-red-200 dark:text-red-400 dark:bg-red-900/20 dark:border-red-800';
     }
   };
 
   const formatDate = (dateString: string) => {
     try {
       return new Date(dateString).toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
+        year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
       });
-    } catch (error) {
+    } catch {
       return 'Invalid date';
     }
   };
 
   const filteredUrls = indexedUrls.filter(url => {
-    const matchesSearch = url.url.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         url.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         (url.description?.toLowerCase().includes(searchTerm.toLowerCase())) ||
-                         url.keywords.some(keyword => keyword.toLowerCase().includes(searchTerm.toLowerCase()));
-    
+    const matchesSearch =
+      url.url.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      url.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      url.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      url.keywords.some(k => k.toLowerCase().includes(searchTerm.toLowerCase()));
     const matchesStatus = filters.status === 'all' || url.status === filters.status;
-    
     return matchesSearch && matchesStatus;
   }).sort((a, b) => {
     switch (filters.sortBy) {
-      case 'url':
-        return filters.sortOrder === 'asc' 
-          ? a.url.localeCompare(b.url) 
-          : b.url.localeCompare(a.url);
-      case 'title':
-        return filters.sortOrder === 'asc' 
-          ? (a.title || '').localeCompare(b.title || '') 
-          : (b.title || '').localeCompare(a.title || '');
-      case 'status':
-        return filters.sortOrder === 'asc' 
-          ? a.status.localeCompare(b.status) 
-          : b.status.localeCompare(a.status);
-      case 'lastCrawled':
-      default:
-        return filters.sortOrder === 'asc' 
-          ? new Date(a.lastCrawled).getTime() - new Date(b.lastCrawled).getTime()
-          : new Date(b.lastCrawled).getTime() - new Date(a.lastCrawled).getTime();
+      case 'url':     return filters.sortOrder === 'asc' ? a.url.localeCompare(b.url) : b.url.localeCompare(a.url);
+      case 'title':   return filters.sortOrder === 'asc' ? (a.title||'').localeCompare(b.title||'') : (b.title||'').localeCompare(a.title||'');
+      case 'status':  return filters.sortOrder === 'asc' ? a.status.localeCompare(b.status) : b.status.localeCompare(a.status);
+      default:        return filters.sortOrder === 'asc'
+        ? new Date(a.lastCrawled).getTime() - new Date(b.lastCrawled).getTime()
+        : new Date(b.lastCrawled).getTime() - new Date(a.lastCrawled).getTime();
     }
   });
 
-  const handleSelectAll = () => {
-    if (selectedUrls.length === filteredUrls.length) {
-      setSelectedUrls([]);
-    } else {
-      setSelectedUrls(filteredUrls.map(url => url.id));
-    }
-  };
+  const handleSelectAll = () =>
+    setSelectedUrls(selectedUrls.length === filteredUrls.length ? [] : filteredUrls.map(u => u.id));
 
-  const handleSelectUrl = (id: string) => {
-    setSelectedUrls(prev =>
-      prev.includes(id)
-        ? prev.filter(urlId => urlId !== id)
-        : [...prev, id]
-    );
-  };
+  const handleSelectUrl = (id: string) =>
+    setSelectedUrls(prev => prev.includes(id) ? prev.filter(uid => uid !== id) : [...prev, id]);
 
   if (loading) {
     return (
@@ -379,9 +360,7 @@ export default function SitemapPage() {
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Sitemap Manager</h1>
-            <p className="mt-2 text-gray-600 dark:text-gray-400">
-              Manage your indexed URLs for internal linking
-            </p>
+            <p className="mt-2 text-gray-600 dark:text-gray-400">Manage your indexed URLs for internal linking</p>
           </div>
           <div className="flex flex-col sm:flex-row gap-4 mt-4 sm:mt-0">
             <button
@@ -398,20 +377,91 @@ export default function SitemapPage() {
                 className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {crawlingInProgress && crawlSiteId === filters.siteId ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                    Crawling...
-                  </>
+                  <><RefreshCw className="w-4 h-4 mr-2 animate-spin" />Crawling...</>
                 ) : (
-                  <>
-                    <Upload className="w-4 h-4 mr-2" />
-                    Crawl Sitemap
-                  </>
+                  <><Upload className="w-4 h-4 mr-2" />Crawl Sitemap</>
                 )}
               </button>
             )}
           </div>
         </div>
+
+        {/* ✅ REAL-TIME CRAWL PROGRESS PANEL */}
+        {crawlingInProgress && crawlSiteId === filters.siteId && (
+          <div className="rounded-xl border border-gray-800 bg-gray-950 shadow-2xl overflow-hidden">
+            {/* Terminal title bar */}
+            <div className="flex items-center justify-between px-4 py-3 bg-gray-900 border-b border-gray-800">
+              <div className="flex items-center gap-3">
+                {/* Traffic-light dots */}
+                <div className="flex gap-1.5">
+                  <span className="w-3 h-3 rounded-full bg-red-500/80" />
+                  <span className="w-3 h-3 rounded-full bg-yellow-500/80" />
+                  <span className="w-3 h-3 rounded-full bg-green-500/80" />
+                </div>
+                <div className="flex items-center gap-2 text-gray-400">
+                  <Terminal className="w-3.5 h-3.5" />
+                  <span className="text-xs font-mono tracking-wider">sitemap-crawler — live feed</span>
+                </div>
+              </div>
+
+              {/* Live counter badge */}
+              <div className="flex items-center gap-2">
+                <Activity className="w-3.5 h-3.5 text-green-400 animate-pulse" />
+                <span className="font-mono text-sm font-bold text-green-400">
+                  {crawlProgress.urlsFound}
+                  <span className="text-gray-500 font-normal text-xs ml-1">URLs indexed</span>
+                </span>
+              </div>
+            </div>
+
+            {/* Scrollable live URL feed */}
+            <div
+              ref={feedScrollRef}
+              className="h-64 overflow-y-auto px-4 py-3 space-y-1 font-mono text-xs"
+              style={{ scrollBehavior: 'smooth' }}
+            >
+              {discoveredUrls.length === 0 && (
+                <p className="text-gray-600 animate-pulse">Initialising crawler…</p>
+              )}
+              {discoveredUrls.map((url, i) => (
+                <div key={i} className="flex items-start gap-2 group">
+                  {/* Line number */}
+                  <span className="text-gray-700 select-none w-6 text-right shrink-0">{i + 1}</span>
+                  {/* Prompt char */}
+                  <span className="text-green-500 shrink-0">›</span>
+                  {/* URL — newest entry pulses briefly */}
+                  <span
+                    className={`text-gray-300 break-all leading-relaxed ${
+                      i === discoveredUrls.length - 1
+                        ? 'text-white font-semibold animate-[fadeIn_0.3s_ease]'
+                        : 'text-gray-400'
+                    }`}
+                  >
+                    {url}
+                  </span>
+                </div>
+              ))}
+
+              {/* Blinking cursor on the last line */}
+              <div className="flex items-center gap-2 mt-1">
+                <span className="text-gray-700 select-none w-6 text-right shrink-0" />
+                <span className="text-green-500">›</span>
+                <span className="inline-block w-2 h-3.5 bg-green-400 animate-[blink_1s_step-end_infinite]" />
+              </div>
+            </div>
+
+            {/* Status bar */}
+            <div className="flex items-center justify-between px-4 py-2 bg-gray-900 border-t border-gray-800">
+              <div className="flex items-center gap-2 text-gray-500 text-xs font-mono truncate">
+                <RefreshCw className="w-3 h-3 animate-spin shrink-0" />
+                <span className="truncate">{crawlProgress.currentUrl || 'Scanning…'}</span>
+              </div>
+              <span className="text-xs text-gray-600 font-mono shrink-0 ml-3">
+                {discoveredUrls.length} / {crawlProgress.urlsFound}
+              </span>
+            </div>
+          </div>
+        )}
 
         {error && (
           <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4">
@@ -459,7 +509,7 @@ export default function SitemapPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Broken URLs</p>
-                  <p className="text-2xl font-bold text-red-600">{stats.errorUrls || 0}</p>
+                  <p className="text-2xl font-bold text-red-600">{stats.brokenUrls || 0}</p>
                 </div>
                 <AlertCircle className="w-8 h-8 text-red-600" />
               </div>
@@ -480,7 +530,6 @@ export default function SitemapPage() {
                 className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
             </div>
-
             <div className="flex gap-2">
               <select
                 value={filters.siteId}
@@ -491,7 +540,6 @@ export default function SitemapPage() {
                   <option key={site.id} value={site.id}>{site.name}</option>
                 ))}
               </select>
-
               <select
                 value={filters.status}
                 onChange={(e) => setFilters(prev => ({ ...prev, status: e.target.value as FilterOptions['status'] }))}
@@ -502,7 +550,6 @@ export default function SitemapPage() {
                 <option value="inactive">Inactive</option>
                 <option value="error">Error</option>
               </select>
-
               <button
                 onClick={() => setShowFilters(!showFilters)}
                 className="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
@@ -515,37 +562,30 @@ export default function SitemapPage() {
           </div>
 
           {showFilters && (
-            <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Sort By
-                  </label>
-                  <select
-                    value={filters.sortBy}
-                    onChange={(e) => setFilters(prev => ({ ...prev, sortBy: e.target.value as FilterOptions['sortBy'] }))}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="lastCrawled">Last Crawled</option>
-                    <option value="url">URL</option>
-                    <option value="title">Title</option>
-                    <option value="status">Status</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Sort Order
-                  </label>
-                  <select
-                    value={filters.sortOrder}
-                    onChange={(e) => setFilters(prev => ({ ...prev, sortOrder: e.target.value as FilterOptions['sortOrder'] }))}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="desc">Descending</option>
-                    <option value="asc">Ascending</option>
-                  </select>
-                </div>
+            <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Sort By</label>
+                <select
+                  value={filters.sortBy}
+                  onChange={(e) => setFilters(prev => ({ ...prev, sortBy: e.target.value as FilterOptions['sortBy'] }))}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="lastCrawled">Last Crawled</option>
+                  <option value="url">URL</option>
+                  <option value="title">Title</option>
+                  <option value="status">Status</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Sort Order</label>
+                <select
+                  value={filters.sortOrder}
+                  onChange={(e) => setFilters(prev => ({ ...prev, sortOrder: e.target.value as FilterOptions['sortOrder'] }))}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="desc">Descending</option>
+                  <option value="asc">Ascending</option>
+                </select>
               </div>
             </div>
           )}
@@ -559,33 +599,17 @@ export default function SitemapPage() {
                 {selectedUrls.length} URL{selectedUrls.length > 1 ? 's' : ''} selected
               </span>
               <div className="flex items-center space-x-2">
-                <button
-                  onClick={() => handleBulkToggleStatus('activate')}
-                  className="inline-flex items-center px-3 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                >
-                  <CheckCircle className="w-4 h-4 mr-1" />
-                  Activate
+                <button onClick={() => handleBulkToggleStatus('activate')} className="inline-flex items-center px-3 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
+                  <CheckCircle className="w-4 h-4 mr-1" />Activate
                 </button>
-                <button
-                  onClick={() => handleBulkToggleStatus('deactivate')}
-                  className="inline-flex items-center px-3 py-1.5 text-sm bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
-                >
-                  <XCircle className="w-4 h-4 mr-1" />
-                  Deactivate
+                <button onClick={() => handleBulkToggleStatus('deactivate')} className="inline-flex items-center px-3 py-1.5 text-sm bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors">
+                  <XCircle className="w-4 h-4 mr-1" />Deactivate
                 </button>
-                <button
-                  onClick={handleBulkDelete}
-                  className="inline-flex items-center px-3 py-1.5 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-                >
-                  <Trash2 className="w-4 h-4 mr-1" />
-                  Delete
+                <button onClick={handleBulkDelete} className="inline-flex items-center px-3 py-1.5 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors">
+                  <Trash2 className="w-4 h-4 mr-1" />Delete
                 </button>
-                <button
-                  onClick={() => setSelectedUrls([])}
-                  className="inline-flex items-center px-3 py-1.5 text-sm bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
-                >
-                  <X className="w-4 h-4 mr-1" />
-                  Clear
+                <button onClick={() => setSelectedUrls([])} className="inline-flex items-center px-3 py-1.5 text-sm bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors">
+                  <X className="w-4 h-4 mr-1" />Clear
                 </button>
               </div>
             </div>
@@ -597,9 +621,7 @@ export default function SitemapPage() {
           {filteredUrls.length === 0 ? (
             <div className="p-12 text-center">
               <Link2 className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
-                No URLs found
-              </h3>
+              <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">No URLs found</h3>
               <p className="text-gray-600 dark:text-gray-400 mb-6">
                 {searchTerm || filters.status !== 'all'
                   ? 'Try adjusting your filters or search terms.'
@@ -614,24 +636,10 @@ export default function SitemapPage() {
                     disabled={crawlingInProgress}
                     className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
                   >
-                    {crawlingInProgress ? (
-                      <>
-                        <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                        Crawling...
-                      </>
-                    ) : (
-                      <>
-                        <Upload className="w-4 h-4 mr-2" />
-                        Crawl Sitemap
-                      </>
-                    )}
+                    {crawlingInProgress ? <><RefreshCw className="w-4 h-4 mr-2 animate-spin" />Crawling...</> : <><Upload className="w-4 h-4 mr-2" />Crawl Sitemap</>}
                   </button>
-                  <button
-                    onClick={() => setShowAddUrlModal(true)}
-                    className="inline-flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                  >
-                    <Plus className="w-4 h-4 mr-2" />
-                    Add Custom URL
+                  <button onClick={() => setShowAddUrlModal(true)} className="inline-flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
+                    <Plus className="w-4 h-4 mr-2" />Add Custom URL
                   </button>
                 </div>
               )}
@@ -649,21 +657,11 @@ export default function SitemapPage() {
                         className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                       />
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                      URL
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                      Title
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                      Status
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                      Last Crawled
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                      Actions
-                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">URL</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Title</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Last Crawled</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
@@ -678,14 +676,7 @@ export default function SitemapPage() {
                         />
                       </td>
                       <td className="px-6 py-4">
-                        
-                        <a
-                        
-                    href={url.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-start gap-1 text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
-                        >
+                        <a href={url.url} target="_blank" rel="noopener noreferrer" className="flex items-start gap-1 text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300">
                           <span className="truncate max-w-sm">{url.url}</span>
                           <ExternalLink className="w-4 h-4 flex-shrink-0 mt-0.5" />
                         </a>
@@ -693,13 +684,9 @@ export default function SitemapPage() {
                       <td className="px-6 py-4">
                         {url.title ? (
                           <div>
-                            <div className="font-medium text-gray-900 dark:text-white">
-                              {url.title}
-                            </div>
+                            <div className="font-medium text-gray-900 dark:text-white">{url.title}</div>
                             {url.description && (
-                              <div className="text-sm text-gray-500 dark:text-gray-400 truncate max-w-xs mt-1">
-                                {url.description}
-                              </div>
+                              <div className="text-sm text-gray-500 dark:text-gray-400 truncate max-w-xs mt-1">{url.description}</div>
                             )}
                           </div>
                         ) : (
@@ -713,15 +700,12 @@ export default function SitemapPage() {
                         </span>
                         {url.statusCode && (
                           <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                            {url.statusCode} 
-                            {url.responseTime && ` (${url.responseTime}ms)`}
+                            {url.statusCode}{url.responseTime && ` (${url.responseTime}ms)`}
                           </div>
                         )}
                       </td>
                       <td className="px-6 py-4">
-                        <div className="text-sm text-gray-900 dark:text-white">
-                          {formatDate(url.lastCrawled)}
-                        </div>
+                        <div className="text-sm text-gray-900 dark:text-white">{formatDate(url.lastCrawled)}</div>
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex items-center space-x-2">
@@ -748,23 +732,6 @@ export default function SitemapPage() {
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
-                          {url.status !== 'active' ? (
-                            <button
-                              onClick={() => handleBulkToggleStatus('activate')}
-                              className="p-2 text-gray-400 hover:text-green-600 transition-colors rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
-                              title="Activate URL"
-                            >
-                              <CheckCircle className="w-4 h-4" />
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => handleBulkToggleStatus('deactivate')}
-                              className="p-2 text-gray-400 hover:text-gray-600 transition-colors rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
-                              title="Deactivate URL"
-                            >
-                              <XCircle className="w-4 h-4" />
-                            </button>
-                          )}
                         </div>
                       </td>
                     </tr>
@@ -780,27 +747,20 @@ export default function SitemapPage() {
       {showAddUrlModal && (
         <div className="fixed inset-0 z-50 overflow-y-auto">
           <div className="flex items-center justify-center min-h-screen p-4 text-center">
-            <div className="fixed inset-0 bg-black bg-opacity-40 transition-opacity" onClick={() => setShowAddUrlModal(false)}></div>
-
+            <div className="fixed inset-0 bg-black bg-opacity-40 transition-opacity" onClick={() => setShowAddUrlModal(false)} />
             <div className="inline-block w-full max-w-md p-6 my-8 overflow-hidden text-left align-middle transition-all transform bg-white dark:bg-gray-800 shadow-xl rounded-2xl">
               <div className="flex justify-between items-center mb-4">
                 <h3 className="text-lg font-medium text-gray-900 dark:text-white">
                   {newUrlData.url ? 'Edit URL' : 'Add Custom URL'}
                 </h3>
-                <button
-                  onClick={() => setShowAddUrlModal(false)}
-                  className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-                >
+                <button onClick={() => setShowAddUrlModal(false)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
                   <X className="w-5 h-5" />
                 </button>
               </div>
-
               <form onSubmit={handleAddUrl}>
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      Site
-                    </label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Site</label>
                     <select
                       value={newUrlData.siteId}
                       onChange={(e) => setNewUrlData(prev => ({ ...prev, siteId: e.target.value }))}
@@ -813,11 +773,8 @@ export default function SitemapPage() {
                       ))}
                     </select>
                   </div>
-
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      URL
-                    </label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">URL</label>
                     <input
                       type="url"
                       value={newUrlData.url}
@@ -827,11 +784,8 @@ export default function SitemapPage() {
                       required
                     />
                   </div>
-
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      Title
-                    </label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Title</label>
                     <input
                       type="text"
                       value={newUrlData.title}
@@ -840,11 +794,8 @@ export default function SitemapPage() {
                       placeholder="Page Title"
                     />
                   </div>
-
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      Description
-                    </label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Description</label>
                     <textarea
                       value={newUrlData.description}
                       onChange={(e) => setNewUrlData(prev => ({ ...prev, description: e.target.value }))}
@@ -853,11 +804,8 @@ export default function SitemapPage() {
                       placeholder="Short description of the page"
                     />
                   </div>
-
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      Keywords (comma-separated)
-                    </label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Keywords (comma-separated)</label>
                     <input
                       type="text"
                       value={newUrlData.keywords}
@@ -867,7 +815,6 @@ export default function SitemapPage() {
                     />
                   </div>
                 </div>
-
                 <div className="mt-6 flex justify-end space-x-3">
                   <button
                     type="button"
@@ -878,9 +825,10 @@ export default function SitemapPage() {
                   </button>
                   <button
                     type="submit"
-                    className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-lg hover:bg-blue-700 transition-colors"
+                    disabled={addUrlLoading}
+                    className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
                   >
-                    {newUrlData.url ? 'Update URL' : 'Add URL'}
+                    {addUrlLoading ? 'Saving...' : newUrlData.url ? 'Update URL' : 'Add URL'}
                   </button>
                 </div>
               </form>
@@ -888,6 +836,18 @@ export default function SitemapPage() {
           </div>
         </div>
       )}
+
+      {/* Keyframe animations */}
+      <style dangerouslySetInnerHTML={{__html: `
+        @keyframes blink {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0; }
+        }
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateX(-4px); }
+          to   { opacity: 1; transform: translateX(0); }
+        }
+      `}} />
     </DashboardLayout>
   );
 }
