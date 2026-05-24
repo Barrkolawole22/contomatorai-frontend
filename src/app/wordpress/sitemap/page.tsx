@@ -160,7 +160,8 @@ export default function SitemapPage() {
     setCrawlProgress({ status: 'Connecting to crawler...', urlsFound: 0, currentUrl: '' });
 
     const token = localStorage.getItem('token') || '';
-    const streamUrl = `${process.env.NEXT_PUBLIC_API_URL || ''}/api/sitemap/crawl/stream?siteId=${siteId}&token=${token}`;
+    const base = process.env.NEXT_PUBLIC_API_URL || `${window.location.origin}/api`;
+    const streamUrl = `${base}/sitemap/crawl/stream?siteId=${siteId}&token=${token}`;
     const eventSource = new EventSource(streamUrl);
 
     eventSource.onmessage = (event) => {
