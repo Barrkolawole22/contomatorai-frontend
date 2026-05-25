@@ -44,7 +44,8 @@ import {
   Link2
 } from 'lucide-react';
 
-// New model configuration with updated models
+export type ContentMode = 'seo_blog' | 'news' | 'academic' | 'technical' | 'commercial' | 'opinion' | 'listicle';
+
 const MODEL_CONFIG: Record<string, { label: string; description: string; creditMultiplier: number; icon: string }> = {
   gemini: {
     label: 'Fast',
@@ -72,6 +73,63 @@ const MODEL_CONFIG: Record<string, { label: string; description: string; creditM
   }
 };
 
+const CONTENT_MODES: Record<ContentMode, {
+  label: string;
+  icon: string;
+  description: string;
+  defaults: {
+    wordCount: number;
+    includeFAQ: boolean;
+    includeStatistics: boolean;
+    includeExamples: boolean;
+    includeComparisons: boolean;
+    includeConclusion: boolean;
+  };
+}> = {
+  seo_blog: {
+    label: 'SEO Blog',
+    icon: '📝',
+    description: 'Conversational evergreen post, question-based headings, featured snippet optimized',
+    defaults: { wordCount: 1500, includeFAQ: true, includeStatistics: true, includeExamples: true, includeComparisons: false, includeConclusion: true }
+  },
+  news: {
+    label: 'News / Reporting',
+    icon: '📰',
+    description: 'Inverted pyramid, 5Ws lead, factual attribution, authority commentary',
+    defaults: { wordCount: 800, includeFAQ: false, includeStatistics: false, includeExamples: false, includeComparisons: false, includeConclusion: true }
+  },
+  academic: {
+    label: 'Academic / Research',
+    icon: '🎓',
+    description: 'Abstract, thesis-driven argument, formal register, evidence-based paragraphs with hedging',
+    defaults: { wordCount: 2500, includeFAQ: false, includeStatistics: true, includeExamples: true, includeComparisons: false, includeConclusion: true }
+  },
+  technical: {
+    label: 'Technical / How-To',
+    icon: '⚙️',
+    description: 'Prerequisites, numbered steps, expected outcomes, troubleshooting section',
+    defaults: { wordCount: 2000, includeFAQ: true, includeStatistics: false, includeExamples: true, includeComparisons: false, includeConclusion: true }
+  },
+  commercial: {
+    label: 'Commercial / Review',
+    icon: '🛍️',
+    description: 'Quick verdict, pros/cons, feature breakdown, who it\'s for, final recommendation',
+    defaults: { wordCount: 1500, includeFAQ: false, includeStatistics: true, includeExamples: true, includeComparisons: true, includeConclusion: true }
+  },
+  opinion: {
+    label: 'Opinion / Editorial',
+    icon: '💬',
+    description: 'Strong thesis, evidence-backed arguments, counterargument section, persuasive close',
+    defaults: { wordCount: 1200, includeFAQ: false, includeStatistics: true, includeExamples: true, includeComparisons: false, includeConclusion: true }
+  },
+  listicle: {
+    label: 'Listicle / Roundup',
+    icon: '📋',
+    description: 'Numbered items, consistent per-item structure, scannable, brief sections',
+    defaults: { wordCount: 1500, includeFAQ: false, includeStatistics: false, includeExamples: true, includeComparisons: false, includeConclusion: false }
+  }
+};
+
 interface SavedKeyword {
   id: string;
   keyword: string;
@@ -91,7 +149,7 @@ interface Site {
 }
 
 interface EnhancedGenerationSettings {
-  tone: 'professional' | 'casual' | 'friendly' | 'authoritative';
+  contentMode: ContentMode;
   wordCount: number;
   includeIntro: boolean;
   includeConclusion: boolean;
@@ -101,7 +159,6 @@ interface EnhancedGenerationSettings {
   contentIntent: 'informational' | 'navigational' | 'commercial' | 'transactional';
   customPrompt: string;
   additionalContext: string;
-  writingStyle: 'conversational' | 'academic' | 'journalistic' | 'technical' | 'creative';
   seoFocus: 'primary_keyword' | 'semantic_keywords' | 'long_tail' | 'balanced';
   callToAction: string;
   includeStatistics: boolean;
@@ -122,11 +179,7 @@ interface GeneratedContent {
   wordCount: number;
   readingTime: number;
   seoScore: number;
-  site?: {
-    id: string;
-    name: string;
-    url: string;
-  } | null;
+  site?: { id: string; name: string; url: string } | null;
 }
 
 export default function EnhancedCreateArticlePage() {
@@ -134,7 +187,7 @@ export default function EnhancedCreateArticlePage() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  
+
   const [step, setStep] = useState<'keyword' | 'site' | 'generate' | 'edit'>('keyword');
   const [selectedKeyword, setSelectedKeyword] = useState<SavedKeyword | null>(null);
   const [savedKeywords, setSavedKeywords] = useState<SavedKeyword[]>([]);
@@ -155,29 +208,28 @@ export default function EnhancedCreateArticlePage() {
   const [publishError, setPublishError] = useState<string | null>(null);
   const [linksLastUpdated, setLinksLastUpdated] = useState<Date | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  
+
   // Scrape URL state
   const [scrapeUrl, setScrapeUrl] = useState('');
   const [scraping, setScraping] = useState(false);
   const [scrapedText, setScrapedText] = useState('');
   const [scrapeError, setScrapeError] = useState<string | null>(null);
-  
+
   // Knowledgebase state
   const [knowledgeDocs, setKnowledgeDocs] = useState<KnowledgeDoc[]>([]);
   const [loadingKnowledgeDocs, setLoadingKnowledgeDocs] = useState(false);
-  
+
   const [settings, setSettings] = useState<EnhancedGenerationSettings>({
-    tone: 'professional',
+    contentMode: 'seo_blog',
     wordCount: 1500,
     includeIntro: true,
     includeConclusion: true,
-    includeFAQ: false,
+    includeFAQ: true,
     targetAudience: 'General audience',
     extraInstructions: '',
     contentIntent: 'informational',
     customPrompt: '',
     additionalContext: '',
-    writingStyle: 'conversational',
     seoFocus: 'balanced',
     callToAction: '',
     includeStatistics: true,
@@ -190,7 +242,7 @@ export default function EnhancedCreateArticlePage() {
     selectedDocIds: [],
     includeExternalLinks: false
   });
-  
+
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
   const [availableSites, setAvailableSites] = useState<Site[]>([]);
   const [selectedSite, setSelectedSite] = useState<string>('');
@@ -199,9 +251,7 @@ export default function EnhancedCreateArticlePage() {
 
   useEffect(() => {
     return () => {
-      if (progressIntervalRef.current) {
-        clearInterval(progressIntervalRef.current);
-      }
+      if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
     };
   }, []);
 
@@ -220,30 +270,38 @@ export default function EnhancedCreateArticlePage() {
     const keywordFromUrl = searchParams?.get('keyword');
     if (keywordFromUrl && savedKeywords.length > 0) {
       const decodedKeyword = decodeURIComponent(keywordFromUrl);
-      const matchingKeyword = savedKeywords.find(k => 
+      const matchingKeyword = savedKeywords.find(k =>
         (k.keyword?.toLowerCase() === decodedKeyword.toLowerCase()) ||
         (k.term?.toLowerCase() === decodedKeyword.toLowerCase())
       );
-      
-      if (matchingKeyword) {
-        setSelectedKeyword(matchingKeyword);
-      } else {
-        setCustomTopic(decodedKeyword);
-      }
+      if (matchingKeyword) setSelectedKeyword(matchingKeyword);
+      else setCustomTopic(decodedKeyword);
     }
   }, [searchParams, savedKeywords]);
 
-  // Load internal link suggestions when site is selected in Step 2
   useEffect(() => {
     if (step === 'site' && settings.includeInternalLinks && selectedSite && (selectedKeyword || customTopic)) {
       loadInternalLinkSuggestions();
     }
   }, [selectedSite, step]);
 
+  const applyModeDefaults = (mode: ContentMode) => {
+    const defaults = CONTENT_MODES[mode].defaults;
+    setSettings(prev => ({
+      ...prev,
+      contentMode: mode,
+      wordCount: defaults.wordCount,
+      includeFAQ: defaults.includeFAQ,
+      includeStatistics: defaults.includeStatistics,
+      includeExamples: defaults.includeExamples,
+      includeComparisons: defaults.includeComparisons,
+      includeConclusion: defaults.includeConclusion,
+    }));
+  };
+
   const loadSavedKeywords = async () => {
     try {
       const response = await keywordsAPI.getHistory({ limit: 100 });
-      
       if (response.data.success) {
         const keywordsData = response.data.data || [];
         const transformedKeywords: SavedKeyword[] = keywordsData.map((k: any) => ({
@@ -255,7 +313,6 @@ export default function EnhancedCreateArticlePage() {
           difficulty: k.difficulty || 0,
           status: 'available' as const
         }));
-        
         setSavedKeywords(transformedKeywords);
       }
     } catch (error) {
@@ -264,8 +321,6 @@ export default function EnhancedCreateArticlePage() {
     }
   };
 
-  // ── Knowledgebase: normalise _id → id at load time so all downstream
-  //    references can safely use doc.id without casting.
   const loadKnowledgeDocs = async () => {
     try {
       setLoadingKnowledgeDocs(true);
@@ -288,16 +343,11 @@ export default function EnhancedCreateArticlePage() {
     try {
       setLoadingSites(true);
       setSiteError(null);
-      
       const response = await sitesAPI.getUserSites();
-      
       if (response.data.success) {
         const sites = response.data.data || [];
         setAvailableSites(sites);
-        
-        if (sites.length > 0 && !selectedSite) {
-          setSelectedSite(sites[0].id);
-        }
+        if (sites.length > 0 && !selectedSite) setSelectedSite(sites[0].id);
       } else {
         throw new Error(response.data.message || 'Failed to load sites');
       }
@@ -312,40 +362,30 @@ export default function EnhancedCreateArticlePage() {
 
   const loadInternalLinkSuggestions = async () => {
     const topic = selectedKeyword?.keyword || selectedKeyword?.term || customTopic;
-    
-    console.log('🔍 Loading internal links...', { topic, selectedSite });
-    
-    if (!topic || !selectedSite) {
-      console.warn('⚠️ Missing topic or site:', { topic, selectedSite });
-      return;
-    }
+    if (!topic || !selectedSite) return;
 
     try {
       setLoadingSuggestions(true);
       setShowInternalLinks(true);
       setError(null);
       setSuccessMessage(null);
-      
+
       const response = await sitemapAPI.getSuggestions(topic, selectedSite);
-      
-      console.log('📡 API Response:', response.data);
-      
+
       if (response.data.success) {
         const links = response.data.data || [];
-        console.log(`✅ Found ${links.length} internal links`, links);
         setInternalLinkSuggestions(links);
         setLinksLastUpdated(new Date());
-        
+
         if (links.length > 0) {
           setSuccessMessage(`Successfully found ${links.length} relevant internal link${links.length !== 1 ? 's' : ''}`);
           setTimeout(() => setSuccessMessage(null), 5000);
         }
       } else {
-        console.warn('⚠️ API returned success=false:', response.data);
         setInternalLinkSuggestions([]);
       }
     } catch (error: any) {
-      console.error('❌ Error loading internal link suggestions:', error);
+      console.error('Error loading internal link suggestions:', error);
       setInternalLinkSuggestions([]);
       setError(`Failed to load internal links: ${error.response?.data?.message || error.message}`);
     } finally {
@@ -353,7 +393,6 @@ export default function EnhancedCreateArticlePage() {
     }
   };
 
-  // Scrape handler
   const handleScrape = async () => {
     if (!scrapeUrl) return;
     setScraping(true);
@@ -387,7 +426,6 @@ export default function EnhancedCreateArticlePage() {
       setError('Please select a keyword or enter a custom topic');
       return;
     }
-    
     setError(null);
     setStep('site');
   };
@@ -397,7 +435,6 @@ export default function EnhancedCreateArticlePage() {
       setSiteError('Please select a WordPress site to continue');
       return;
     }
-    
     setSiteError(null);
     generateContent();
   };
@@ -408,13 +445,11 @@ export default function EnhancedCreateArticlePage() {
       setError('Please select a keyword or enter a custom topic');
       return;
     }
-
     if (!selectedSite) {
       setError('Please select a WordPress site before generating content');
       setStep('site');
       return;
     }
-
     if (!user || (user.wordCredits || user.credits || 0) < estimatedCredits) {
       setError(`Insufficient credits. You need ${estimatedCredits} credits but only have ${user?.wordCredits || user?.credits || 0} remaining.`);
       return;
@@ -436,7 +471,6 @@ export default function EnhancedCreateArticlePage() {
     ];
 
     let currentStageIndex = 0;
-
     progressIntervalRef.current = setInterval(() => {
       if (currentStageIndex < progressStages.length - 1) {
         currentStageIndex++;
@@ -445,13 +479,10 @@ export default function EnhancedCreateArticlePage() {
         setLoadingProgress(progress);
       }
     }, 8000);
-    
+
     try {
-      // selectedDocIds are passed to the backend which extracts and injects
-      // the full text of each document directly into the AI prompt as context.
-      // Only merge user-typed context and scraped text as additionalContext here.
       const enhancedOptions = {
-        tone: settings.tone,
+        contentMode: settings.contentMode,
         wordCount: settings.wordCount,
         targetAudience: settings.targetAudience,
         includeIntroduction: settings.includeIntro,
@@ -460,11 +491,7 @@ export default function EnhancedCreateArticlePage() {
         contentIntent: settings.contentIntent,
         customPrompt: settings.customPrompt,
         selectedDocIds: settings.selectedDocIds,
-        additionalContext: [
-          settings.additionalContext,
-          scrapedText
-        ].filter(Boolean).join('\n\n') || undefined,
-        writingStyle: settings.writingStyle,
+        additionalContext: [settings.additionalContext, scrapedText].filter(Boolean).join('\n\n') || undefined,
         seoFocus: settings.seoFocus,
         callToAction: settings.callToAction,
         includeStatistics: settings.includeStatistics,
@@ -480,19 +507,19 @@ export default function EnhancedCreateArticlePage() {
           settings.extraInstructions,
           settings.customPrompt,
           settings.includeInternalLinks && internalLinkSuggestions.length > 0
-            ? `Include internal links to relevant pages from our site. Available links: ${internalLinkSuggestions.map(s => s.title).join(', ')}`
+            ? `Include internal links to relevant pages. Available links: ${internalLinkSuggestions.map(s => s.title).join(', ')}`
             : '',
           settings.includeExternalLinks ? 'Include relevant external links to authoritative sources.' : ''
         ].filter(Boolean).join('\n\n')
       };
-      
+
       const response = await contentAPI.generateContent({
         keyword: topic,
         siteId: selectedSite,
         model: selectedModel,
         options: enhancedOptions
       } as any);
-      
+
       if (progressIntervalRef.current) {
         clearInterval(progressIntervalRef.current);
         progressIntervalRef.current = null;
@@ -500,10 +527,9 @@ export default function EnhancedCreateArticlePage() {
 
       setLoadingStage('Content generated successfully!');
       setLoadingProgress(100);
-      
+
       if (response.data.success) {
         const contentData = response.data.data;
-        
         setGeneratedContent({
           id: contentData.id,
           title: contentData.title,
@@ -513,24 +539,17 @@ export default function EnhancedCreateArticlePage() {
           seoScore: contentData.seoScore || 0,
           site: contentData.site
         });
-        
-        // Refresh user data to update credits in UI
         await refreshUser();
-        
-        setTimeout(() => {
-          setStep('generate');
-        }, 500);
+        setTimeout(() => setStep('generate'), 500);
       } else {
         throw new Error(response.data.message || 'Failed to generate content');
       }
     } catch (error: any) {
       console.error('Error generating content:', error);
-      
       if (progressIntervalRef.current) {
         clearInterval(progressIntervalRef.current);
         progressIntervalRef.current = null;
       }
-      
       setError(error.response?.data?.message || error.message || 'Failed to generate content. Please try again.');
     } finally {
       setLoading(false);
@@ -544,7 +563,6 @@ export default function EnhancedCreateArticlePage() {
       setPublishError('No content to publish');
       return;
     }
-
     setPublishError(null);
     setShowPublishProgress(true);
 
@@ -564,13 +582,10 @@ export default function EnhancedCreateArticlePage() {
       setPublishStep('uploading');
       const response = await contentAPI.publishContent(generatedContent.id, { siteId: selectedSite });
 
-      if (!response.data.success) {
-        throw new Error(response.data.message || 'Publishing failed');
-      }
+      if (!response.data.success) throw new Error(response.data.message || 'Publishing failed');
 
       setPublishStep('publishing');
       await new Promise(resolve => setTimeout(resolve, 1500));
-
       setPublishStep('complete');
 
       setTimeout(() => {
@@ -602,26 +617,10 @@ export default function EnhancedCreateArticlePage() {
     }
   };
 
-  const getIntentDescription = (intent: string) => {
-    switch (intent) {
-      case 'informational': 
-        return 'Educational content that answers questions and provides valuable information';
-      case 'navigational': 
-        return 'Content that helps users find specific information or navigate to resources';
-      case 'commercial': 
-        return 'Content that compares products/services and influences purchasing decisions';
-      case 'transactional': 
-        return 'Content designed to drive immediate action like purchases or sign-ups';
-      default: 
-        return 'General purpose content';
-    }
-  };
-
   const getStepStatus = (stepName: string) => {
     const stepOrder = ['keyword', 'site', 'generate', 'edit'];
     const currentIndex = stepOrder.indexOf(step);
     const stepIndex = stepOrder.indexOf(stepName);
-    
     if (stepIndex < currentIndex) return 'completed';
     if (stepIndex === currentIndex) return 'current';
     return 'upcoming';
@@ -636,14 +635,12 @@ export default function EnhancedCreateArticlePage() {
   const formatTimeAgo = (date: Date | null) => {
     if (!date) return '';
     const seconds = Math.floor((new Date().getTime() - date.getTime()) / 1000);
-    
     if (seconds < 60) return 'just now';
     if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`;
     if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours ago`;
     return date.toLocaleString();
   };
 
-  // Derive total words for selected knowledgebase docs to show a context-size hint
   const selectedDocsWordCount = knowledgeDocs
     .filter(doc => settings.selectedDocIds.includes(doc.id))
     .reduce((sum, doc) => sum + ((doc as any).totalWords || 0), 0);
@@ -690,39 +687,24 @@ export default function EnhancedCreateArticlePage() {
             ].map((stepItem, index) => {
               const status = getStepStatus(stepItem.key);
               const Icon = stepItem.icon;
-              
               return (
                 <div key={stepItem.key} className="flex items-center">
                   <div className="text-center">
                     <div className={`flex items-center justify-center w-12 h-12 rounded-full mb-2 ${
-                      status === 'completed' 
-                        ? 'bg-green-100 text-green-600' 
-                        : status === 'current'
-                        ? 'bg-blue-100 text-blue-600'
-                        : 'bg-gray-100 text-gray-400'
+                      status === 'completed' ? 'bg-green-100 text-green-600'
+                      : status === 'current' ? 'bg-blue-100 text-blue-600'
+                      : 'bg-gray-100 text-gray-400'
                     }`}>
-                      {status === 'completed' ? (
-                        <Check className="w-6 h-6" />
-                      ) : (
-                        <Icon className="w-6 h-6" />
-                      )}
+                      {status === 'completed' ? <Check className="w-6 h-6" /> : <Icon className="w-6 h-6" />}
                     </div>
                     <div className={`text-sm font-medium ${
-                      status === 'current' 
-                        ? 'text-blue-600' 
-                        : status === 'completed'
-                        ? 'text-green-600'
-                        : 'text-gray-400'
-                    }`}>
-                      {stepItem.label}
-                    </div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                      {stepItem.description}
-                    </div>
+                      status === 'current' ? 'text-blue-600'
+                      : status === 'completed' ? 'text-green-600'
+                      : 'text-gray-400'
+                    }`}>{stepItem.label}</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">{stepItem.description}</div>
                   </div>
-                  {index < 3 && (
-                    <ArrowRight className="w-6 h-6 text-gray-300 mx-4" />
-                  )}
+                  {index < 3 && <ArrowRight className="w-6 h-6 text-gray-300 mx-4" />}
                 </div>
               );
             })}
@@ -735,13 +717,9 @@ export default function EnhancedCreateArticlePage() {
             <div className="flex items-start">
               <AlertCircle className="w-5 h-5 text-red-400 mr-3 flex-shrink-0 mt-0.5" />
               <div className="flex-1">
-                <h3 className="text-sm font-medium text-red-800 dark:text-red-200">Error</h3>
                 <p className="text-sm text-red-700 dark:text-red-300 mt-1">{error}</p>
               </div>
-              <button
-                onClick={() => setError(null)}
-                className="text-red-400 hover:text-red-600"
-              >
+              <button onClick={() => setError(null)} className="text-red-400 hover:text-red-600">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -756,17 +734,14 @@ export default function EnhancedCreateArticlePage() {
               <div className="flex-1">
                 <p className="text-sm text-green-700 dark:text-green-300">{successMessage}</p>
               </div>
-              <button
-                onClick={() => setSuccessMessage(null)}
-                className="text-green-400 hover:text-green-600"
-              >
+              <button onClick={() => setSuccessMessage(null)} className="text-green-400 hover:text-green-600">
                 <X className="w-5 h-5" />
               </button>
             </div>
           </div>
         )}
 
-        {/* Loading State with Progress Bar */}
+        {/* Loading State */}
         {loading && (
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-8">
             <div className="max-w-2xl mx-auto">
@@ -776,47 +751,22 @@ export default function EnhancedCreateArticlePage() {
                   <Sparkles className="w-6 h-6 text-yellow-500 absolute -top-1 -right-1" />
                 </div>
                 <h3 className="text-xl font-semibold text-gray-900 dark:text-white mt-4 mb-2">
-                  Generating Enhanced Content with {MODEL_CONFIG[selectedModel].label}
+                  Generating {CONTENT_MODES[settings.contentMode].label} with {MODEL_CONFIG[selectedModel].label}
                 </h3>
-                <p className="text-gray-600 dark:text-gray-400">
-                  {loadingStage}
-                </p>
+                <p className="text-gray-600 dark:text-gray-400">{loadingStage}</p>
               </div>
-
-              {/* Progress Bar */}
               <div className="mb-6">
                 <div className="flex justify-between text-sm text-gray-600 dark:text-gray-400 mb-2">
                   <span>Progress</span>
                   <span className="font-medium">{loadingProgress}%</span>
                 </div>
                 <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-                  <div 
+                  <div
                     className="h-full bg-gradient-to-r from-blue-500 to-purple-600 rounded-full transition-all duration-1000 ease-out"
                     style={{ width: `${loadingProgress}%` }}
                   />
                 </div>
               </div>
-
-              {/* Feature Highlights */}
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
-                  <Check className="w-4 h-4 text-green-500" />
-                  <span>{MODEL_CONFIG[selectedModel].label}</span>
-                </div>
-                <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
-                  <Check className="w-4 h-4 text-green-500" />
-                  <span>SEO Optimization</span>
-                </div>
-                <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
-                  <Check className="w-4 h-4 text-green-500" />
-                  <span>Custom Settings</span>
-                </div>
-                <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
-                  <Check className="w-4 h-4 text-green-500" />
-                  <span>{settings.includeInternalLinks ? 'Internal Links' : 'Quality Assured'}</span>
-                </div>
-              </div>
-
               <div className="mt-6 text-center text-xs text-gray-500 dark:text-gray-400">
                 This may take 30-60 seconds depending on content length and model selection
               </div>
@@ -833,8 +783,7 @@ export default function EnhancedCreateArticlePage() {
                 <Target className="w-5 h-5" />
                 Choose Your Topic
               </h3>
-              
-              {/* Saved Keywords */}
+
               <div className="mb-6">
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
                   Select from Saved Keywords
@@ -843,20 +792,15 @@ export default function EnhancedCreateArticlePage() {
                   {savedKeywords.slice(0, 6).map((keyword) => (
                     <div
                       key={keyword.id}
-                      onClick={() => {
-                        setSelectedKeyword(keyword);
-                        setCustomTopic('');
-                      }}
+                      onClick={() => { setSelectedKeyword(keyword); setCustomTopic(''); }}
                       className={`p-4 border-2 rounded-lg cursor-pointer transition-all ${
                         selectedKeyword?.id === keyword.id
                           ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                          : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                          : 'border-gray-200 dark:border-gray-700 hover:border-gray-300'
                       }`}
                     >
                       <div className="flex items-center justify-between mb-2">
-                        <h4 className="font-medium text-gray-900 dark:text-white">
-                          {keyword.keyword}
-                        </h4>
+                        <h4 className="font-medium text-gray-900 dark:text-white">{keyword.keyword}</h4>
                         <span className={`px-2 py-1 text-xs font-medium rounded-full ${getDifficultyColor(keyword.difficulty)}`}>
                           {keyword.difficulty}
                         </span>
@@ -869,7 +813,6 @@ export default function EnhancedCreateArticlePage() {
                 </div>
               </div>
 
-              {/* Custom Topic */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Or Enter Custom Topic
@@ -877,61 +820,55 @@ export default function EnhancedCreateArticlePage() {
                 <input
                   type="text"
                   value={customTopic}
-                  onChange={(e) => {
-                    setCustomTopic(e.target.value);
-                    if (e.target.value) setSelectedKeyword(null);
-                  }}
+                  onChange={(e) => { setCustomTopic(e.target.value); if (e.target.value) setSelectedKeyword(null); }}
                   placeholder="Enter your topic or keyword..."
-                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 />
               </div>
             </div>
 
-            {/* Content Intent Selection */}
+            {/* Content Mode Selection */}
             <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2 flex items-center gap-2">
                 <Layers className="w-5 h-5" />
-                Content Intent & Purpose
+                Content Mode
               </h3>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {[
-                  { key: 'informational', label: 'Informational', icon: BookOpen },
-                  { key: 'navigational', label: 'Navigational', icon: Target },
-                  { key: 'commercial', label: 'Commercial', icon: BarChart3 },
-                  { key: 'transactional', label: 'Transactional', icon: ShoppingCart }
-                ].map(({ key, label, icon: Icon }) => (
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+                Determines structure, voice, and formatting. Defaults update automatically.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                {(Object.entries(CONTENT_MODES) as [ContentMode, typeof CONTENT_MODES[ContentMode]][]).map(([key, mode]) => (
                   <div
                     key={key}
-                    onClick={() => setSettings(prev => ({ ...prev, contentIntent: key as any }))}
+                    onClick={() => applyModeDefaults(key)}
                     className={`p-4 border-2 rounded-lg cursor-pointer transition-all ${
-                      settings.contentIntent === key
-                        ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                      settings.contentMode === key
+                        ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 shadow-md'
                         : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
                     }`}
                   >
-                    <div className="flex items-center mb-2">
-                      <Icon className="w-5 h-5 text-blue-600 mr-3" />
-                      <h4 className="font-medium text-gray-900 dark:text-white">
-                        {label}
-                      </h4>
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-xl">{mode.icon}</span>
+                      <h4 className="font-semibold text-sm text-gray-900 dark:text-white">{mode.label}</h4>
+                      {settings.contentMode === key && <Check className="w-4 h-4 text-blue-500 ml-auto" />}
                     </div>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
-                      {getIntentDescription(key)}
-                    </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">{mode.description}</p>
+                    <div className="mt-2 text-xs text-blue-600 dark:text-blue-400 font-medium">
+                      ~{mode.defaults.wordCount.toLocaleString()} words
+                    </div>
                   </div>
                 ))}
               </div>
             </div>
 
-            {/* Knowledgebase Document Selection */}
+            {/* Knowledgebase Context */}
             <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
               <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
                 <BookOpen className="w-5 h-5" />
                 Knowledgebase Context
               </h3>
               <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                Select documents from your knowledgebase. The full text of each selected document will be injected directly into the AI prompt as context.
+                Select documents to inject as context into the AI prompt.
               </p>
               {loadingKnowledgeDocs ? (
                 <div className="text-sm text-gray-500">Loading knowledgebase documents...</div>
@@ -943,10 +880,7 @@ export default function EnhancedCreateArticlePage() {
                     {knowledgeDocs.map(doc => {
                       const isChecked = settings.selectedDocIds.includes(doc.id);
                       return (
-                        <label
-                          key={doc.id}
-                          className="flex items-center gap-2 py-1 text-sm cursor-pointer"
-                        >
+                        <label key={doc.id} className="flex items-center gap-2 py-1 text-sm cursor-pointer">
                           <input
                             type="checkbox"
                             checked={isChecked}
@@ -960,9 +894,7 @@ export default function EnhancedCreateArticlePage() {
                           />
                           <span className="text-gray-800 dark:text-gray-200 flex-1">{doc.title}</span>
                           {(doc as any).totalWords > 0 && (
-                            <span className="text-xs text-gray-400 dark:text-gray-500">
-                              {(doc as any).totalWords.toLocaleString()} words
-                            </span>
+                            <span className="text-xs text-gray-400">{(doc as any).totalWords.toLocaleString()} words</span>
                           )}
                           <span className={`text-xs px-2 py-0.5 rounded-full ${
                             doc.status === 'ready' ? 'bg-green-100 text-green-700' :
@@ -973,8 +905,6 @@ export default function EnhancedCreateArticlePage() {
                       );
                     })}
                   </div>
-
-                  {/* Context size hint */}
                   {settings.selectedDocIds.length > 0 && (
                     <div className={`mt-2 text-xs px-3 py-2 rounded-lg ${
                       selectedDocsWordCount > 8000
@@ -982,7 +912,7 @@ export default function EnhancedCreateArticlePage() {
                         : 'bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300'
                     }`}>
                       {selectedDocsWordCount > 0
-                        ? `~${selectedDocsWordCount.toLocaleString()} words selected for context injection${selectedDocsWordCount > 8000 ? ' — large context may increase generation time' : ''}`
+                        ? `~${selectedDocsWordCount.toLocaleString()} words selected${selectedDocsWordCount > 8000 ? ' — large context may increase generation time' : ''}`
                         : `${settings.selectedDocIds.length} doc${settings.selectedDocIds.length !== 1 ? 's' : ''} selected`}
                     </div>
                   )}
@@ -996,7 +926,6 @@ export default function EnhancedCreateArticlePage() {
                 <MessageSquare className="w-5 h-5" />
                 Custom Instructions
               </h3>
-              
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -1006,12 +935,10 @@ export default function EnhancedCreateArticlePage() {
                     value={settings.customPrompt}
                     onChange={(e) => setSettings(prev => ({ ...prev, customPrompt: e.target.value }))}
                     placeholder="Add specific instructions for how you want the content written..."
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                     rows={3}
                   />
                 </div>
-
-                {/* Scrape URL section */}
                 <div className="border-t pt-4">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                     <ExternalLink className="w-4 h-4 inline mr-1" />
@@ -1028,7 +955,7 @@ export default function EnhancedCreateArticlePage() {
                     <button
                       onClick={handleScrape}
                       disabled={!scrapeUrl || scraping}
-                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
                     >
                       {scraping ? 'Extracting...' : 'Extract'}
                     </button>
@@ -1036,7 +963,7 @@ export default function EnhancedCreateArticlePage() {
                   {scrapeError && <p className="text-sm text-red-600 mt-1">{scrapeError}</p>}
                   {scrapedText && (
                     <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                      Scraped {scrapedText.split(/\s+/).length} words. Appended to context.
+                      Scraped {scrapedText.split(/\s+/).length} words.
                       <button onClick={() => setScrapedText('')} className="ml-2 text-red-400 hover:underline">Clear</button>
                     </div>
                   )}
@@ -1058,66 +985,23 @@ export default function EnhancedCreateArticlePage() {
                   {showAdvancedSettings ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
                 </button>
               </div>
-              
+
               {showAdvancedSettings && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Tone
-                    </label>
-                    <select
-                      value={settings.tone}
-                      onChange={(e) => setSettings(prev => ({ ...prev, tone: e.target.value as any }))}
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Word Count</label>
+                    <input
+                      type="number"
+                      value={settings.wordCount}
+                      onChange={(e) => setSettings(prev => ({ ...prev, wordCount: parseInt(e.target.value) || 1500 }))}
+                      min="300" max="5000" step="100"
                       className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                    >
-                      <option value="professional">Professional</option>
-                      <option value="casual">Casual</option>
-                      <option value="friendly">Friendly</option>
-                      <option value="authoritative">Authoritative</option>
-                    </select>
+                    />
+                    <div className="text-xs text-gray-500 mt-1">300 - 5,000 words</div>
                   </div>
-                  
+
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Writing Style
-                    </label>
-                    <select
-                      value={settings.writingStyle}
-                      onChange={(e) => setSettings(prev => ({ ...prev, writingStyle: e.target.value as any }))}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                    >
-                      <option value="conversational">Conversational</option>
-                      <option value="academic">Academic</option>
-                      <option value="journalistic">Journalistic</option>
-                      <option value="technical">Technical</option>
-                      <option value="creative">Creative</option>
-                    </select>
-                  </div>
-                  
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Word Count
-                    </label>
-                    <div className="space-y-2">
-                      <input
-                        type="number"
-                        value={settings.wordCount}
-                        onChange={(e) => setSettings(prev => ({ ...prev, wordCount: parseInt(e.target.value) || 1500 }))}
-                        min="300"
-                        max="5000"
-                        step="100"
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                      />
-                      <div className="text-xs text-gray-500 dark:text-gray-400">
-                        300 - 5,000 words
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      SEO Focus
-                    </label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">SEO Focus</label>
                     <select
                       value={settings.seoFocus}
                       onChange={(e) => setSettings(prev => ({ ...prev, seoFocus: e.target.value as any }))}
@@ -1129,7 +1013,32 @@ export default function EnhancedCreateArticlePage() {
                       <option value="long_tail">Long-tail Keywords</option>
                     </select>
                   </div>
-                  
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Content Intent</label>
+                    <select
+                      value={settings.contentIntent}
+                      onChange={(e) => setSettings(prev => ({ ...prev, contentIntent: e.target.value as any }))}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    >
+                      <option value="informational">Informational</option>
+                      <option value="navigational">Navigational</option>
+                      <option value="commercial">Commercial</option>
+                      <option value="transactional">Transactional</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Target Keyword Density (%)</label>
+                    <input
+                      type="number"
+                      value={settings.targetKeywordDensity}
+                      onChange={(e) => setSettings(prev => ({ ...prev, targetKeywordDensity: parseFloat(e.target.value) || 1.5 }))}
+                      min="0.5" max="5" step="0.1"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    />
+                  </div>
+
                   <div className="md:col-span-2">
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                       Call to Action (Optional)
@@ -1144,9 +1053,7 @@ export default function EnhancedCreateArticlePage() {
                   </div>
 
                   <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-                      Content Features
-                    </label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Content Features</label>
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                       {[
                         { key: 'includeIntro', label: 'Introduction' },
@@ -1154,7 +1061,8 @@ export default function EnhancedCreateArticlePage() {
                         { key: 'includeFAQ', label: 'FAQ Section' },
                         { key: 'includeStatistics', label: 'Statistics' },
                         { key: 'includeExamples', label: 'Examples' },
-                        { key: 'includeComparisons', label: 'Comparisons' }
+                        { key: 'includeComparisons', label: 'Comparisons' },
+                        { key: 'includeExternalLinks', label: 'External Links' },
                       ].map(({ key, label }) => (
                         <label key={key} className="flex items-center">
                           <input
@@ -1166,43 +1074,30 @@ export default function EnhancedCreateArticlePage() {
                           <span className="text-sm text-gray-700 dark:text-gray-300">{label}</span>
                         </label>
                       ))}
-                      <label className="flex items-center">
-                        <input
-                          type="checkbox"
-                          checked={settings.includeExternalLinks}
-                          onChange={(e) => setSettings(prev => ({ ...prev, includeExternalLinks: e.target.checked }))}
-                          className="mr-2 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                        />
-                        <span className="text-sm text-gray-700 dark:text-gray-300">Include External Links</span>
-                      </label>
                     </div>
                   </div>
 
                   {/* Model Selector */}
                   <div className="md:col-span-2">
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-                      Generation Speed & Quality
+                      Generation Model
                     </label>
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                       {Object.entries(MODEL_CONFIG).map(([modelKey, modelConfig]) => (
                         <div
                           key={modelKey}
-                          onClick={() => setSelectedModel(modelKey as 'gemini' | 'gemini-pro' | 'gpt4o' | 'claude')}
+                          onClick={() => setSelectedModel(modelKey as any)}
                           className={`p-4 border-2 rounded-lg cursor-pointer transition-all ${
                             selectedModel === modelKey
                               ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 shadow-md'
-                              : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                              : 'border-gray-200 dark:border-gray-700 hover:border-gray-300'
                           }`}
                         >
                           <div className="flex items-center gap-2 mb-2">
                             <span className="text-2xl">{modelConfig.icon}</span>
-                            <h4 className="font-semibold text-gray-900 dark:text-white">
-                              {modelConfig.label}
-                            </h4>
+                            <h4 className="font-semibold text-gray-900 dark:text-white">{modelConfig.label}</h4>
                           </div>
-                          <p className="text-xs text-gray-600 dark:text-gray-400 mb-2">
-                            {modelConfig.description}
-                          </p>
+                          <p className="text-xs text-gray-600 dark:text-gray-400 mb-2">{modelConfig.description}</p>
                           <div className="text-sm font-medium text-blue-600 dark:text-blue-400">
                             {modelConfig.creditMultiplier}x credits
                           </div>
@@ -1210,16 +1105,10 @@ export default function EnhancedCreateArticlePage() {
                       ))}
                     </div>
                     <div className="mt-3 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm text-blue-700 dark:text-blue-300">
-                          <span className="font-semibold">Estimated cost: </span>
-                          {estimatedCredits.toLocaleString()} credits for {settings.wordCount} words
-                        </p>
-                        <div className="flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400">
-                          <Zap className="w-3 h-3" />
-                          <span>{MODEL_CONFIG[selectedModel].label}</span>
-                        </div>
-                      </div>
+                      <p className="text-sm text-blue-700 dark:text-blue-300">
+                        <span className="font-semibold">Estimated cost: </span>
+                        {estimatedCredits.toLocaleString()} credits for {settings.wordCount.toLocaleString()} words
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -1240,7 +1129,7 @@ export default function EnhancedCreateArticlePage() {
           </div>
         )}
 
-        {/* Step 2: Site Selection with Internal Links Configuration */}
+        {/* Step 2: Site Selection */}
         {step === 'site' && !loading && (
           <div className="space-y-6">
             <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
@@ -1251,12 +1140,12 @@ export default function EnhancedCreateArticlePage() {
                     Choose WordPress Site
                   </h3>
                   <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                    Select the WordPress site where you want to publish this content
+                    Select the site where this content will be published
                   </p>
                 </div>
                 <button
                   onClick={() => setStep('keyword')}
-                  className="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white flex items-center gap-2"
+                  className="text-gray-600 dark:text-gray-400 hover:text-gray-900 flex items-center gap-2"
                 >
                   <ArrowRight className="w-4 h-4 rotate-180" />
                   Back
@@ -1280,12 +1169,9 @@ export default function EnhancedCreateArticlePage() {
               ) : availableSites.length === 0 ? (
                 <div className="text-center py-12">
                   <Globe className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
-                    No WordPress Sites Connected
-                  </h3>
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">No WordPress Sites Connected</h3>
                   <p className="text-gray-600 dark:text-gray-400 mb-6 max-w-md mx-auto">
-                    You need to connect at least one WordPress site before generating content. 
-                    Connect your site to enable seamless publishing.
+                    Connect a WordPress site to enable publishing.
                   </p>
                   <div className="flex justify-center gap-4">
                     <button
@@ -1309,43 +1195,27 @@ export default function EnhancedCreateArticlePage() {
                     {availableSites.map((site) => (
                       <div
                         key={site.id}
-                        onClick={() => {
-                          setSelectedSite(site.id);
-                          setSiteError(null);
-                        }}
+                        onClick={() => { setSelectedSite(site.id); setSiteError(null); }}
                         className={`p-5 border-2 rounded-lg cursor-pointer transition-all ${
                           selectedSite === site.id
                             ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 shadow-md'
-                            : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                            : 'border-gray-200 dark:border-gray-700 hover:border-gray-300'
                         }`}
                       >
                         <div className="flex items-start justify-between mb-3">
                           <div className="flex-1">
-                            <h4 className="font-semibold text-gray-900 dark:text-white mb-1">
-                              {site.name}
-                            </h4>
-                            <p className="text-sm text-gray-600 dark:text-gray-400 break-all">
-                              {site.url}
-                            </p>
+                            <h4 className="font-semibold text-gray-900 dark:text-white mb-1">{site.name}</h4>
+                            <p className="text-sm text-gray-600 dark:text-gray-400 break-all">{site.url}</p>
                           </div>
                           <div className={`ml-3 flex-shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center ${
-                            selectedSite === site.id
-                              ? 'border-blue-500 bg-blue-500'
-                              : 'border-gray-300 dark:border-gray-600'
+                            selectedSite === site.id ? 'border-blue-500 bg-blue-500' : 'border-gray-300 dark:border-gray-600'
                           }`}>
-                            {selectedSite === site.id && (
-                              <Check className="w-4 h-4 text-white" />
-                            )}
+                            {selectedSite === site.id && <Check className="w-4 h-4 text-white" />}
                           </div>
                         </div>
-                        
-                        <div className="flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
-                          <span className={`flex items-center gap-1 ${
-                            site.isActive ? 'text-green-600 dark:text-green-400' : 'text-gray-500'
-                          }`}>
-                            <div className={`w-2 h-2 rounded-full ${
-                              site.isActive ? 'bg-green-500' : 'bg-gray-400'
-                            }`}></div>
+                        <div className="flex items-center gap-4 text-xs text-gray-500">
+                          <span className={`flex items-center gap-1 ${site.isActive ? 'text-green-600' : 'text-gray-500'}`}>
+                            <div className={`w-2 h-2 rounded-full ${site.isActive ? 'bg-green-500' : 'bg-gray-400'}`}></div>
                             {site.isActive ? 'Active' : 'Inactive'}
                           </span>
                           <span className="flex items-center gap-1">
@@ -1356,11 +1226,10 @@ export default function EnhancedCreateArticlePage() {
                       </div>
                     ))}
                   </div>
-
                   <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
                     <button
                       onClick={() => router.push('/wordpress')}
-                      className="w-full py-3 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-all flex items-center justify-center gap-2 text-gray-600 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400"
+                      className="w-full py-3 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-all flex items-center justify-center gap-2 text-gray-600 dark:text-gray-400 hover:text-blue-600"
                     >
                       <Plus className="w-5 h-5" />
                       <span className="font-medium">Connect Another WordPress Site</span>
@@ -1384,160 +1253,80 @@ export default function EnhancedCreateArticlePage() {
                     className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all ${
                       loadingSuggestions
                         ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
-                        : 'bg-blue-600 text-white hover:bg-blue-700 shadow-sm hover:shadow-md'
+                        : 'bg-blue-600 text-white hover:bg-blue-700'
                     }`}
                   >
                     <RefreshCw className={`w-4 h-4 ${loadingSuggestions ? 'animate-spin' : ''}`} />
-                    {loadingSuggestions ? 'Finding Links...' : internalLinkSuggestions.length > 0 ? `Refresh (${internalLinkSuggestions.length})` : 'Find Links'}
+                    {loadingSuggestions ? 'Finding...' : internalLinkSuggestions.length > 0 ? `Refresh (${internalLinkSuggestions.length})` : 'Find Links'}
                   </button>
                 </div>
 
-                <div className="space-y-4">
-                  <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
-                    <div className="flex items-start">
-                      <Lightbulb className="w-5 h-5 text-blue-600 dark:text-blue-400 mt-0.5 mr-3 flex-shrink-0" />
-                      <div>
-                        <p className="text-sm font-medium text-blue-800 dark:text-blue-200">
-                          Smart Internal Linking Active
-                        </p>
-                        <p className="text-xs text-blue-700 dark:text-blue-300 mt-1">
-                          AI will automatically find and insert relevant internal links from your indexed URLs during content generation
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                        Link Density (per 1000 words)
-                      </label>
-                      <input
-                        type="number"
-                        value={settings.internalLinkDensity}
-                        onChange={(e) => setSettings(prev => ({ ...prev, internalLinkDensity: parseInt(e.target.value) || 3 }))}
-                        min="1"
-                        max="10"
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                        Maximum Links
-                      </label>
-                      <input
-                        type="number"
-                        value={settings.maxInternalLinks}
-                        onChange={(e) => setSettings(prev => ({ ...prev, maxInternalLinks: parseInt(e.target.value) || 5 }))}
-                        min="1"
-                        max="20"
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
-                      />
-                    </div>
-                  </div>
-
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                   <div>
-                    <div className="flex items-center justify-between mb-3">
-                      <button
-                        onClick={() => {
-                          setShowInternalLinks(!showInternalLinks);
-                          if (!showInternalLinks && internalLinkSuggestions.length === 0) {
-                            loadInternalLinkSuggestions();
-                          }
-                        }}
-                        className="flex items-center gap-2 text-sm text-blue-600 dark:text-blue-400 hover:underline"
-                      >
-                        {showInternalLinks ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                        {loadingSuggestions 
-                          ? '🔄 Loading available links...' 
-                          : internalLinkSuggestions.length > 0
-                          ? `✅ ${internalLinkSuggestions.length} links found - Click to ${showInternalLinks ? 'hide' : 'view'}`
-                          : 'Check for available links'}
-                      </button>
-                      {linksLastUpdated && internalLinkSuggestions.length > 0 && (
-                        <span className="text-xs text-gray-500 dark:text-gray-400">
-                          Updated {formatTimeAgo(linksLastUpdated)}
-                        </span>
-                      )}
-                    </div>
-
-                    {showInternalLinks && (
-                      <div className="mt-3">
-                        {loadingSuggestions ? (
-                          <div className="text-center py-8">
-                            <RefreshCw className="w-8 h-8 text-blue-600 mx-auto mb-3 animate-spin" />
-                            <p className="text-sm text-gray-600 dark:text-gray-400">
-                              Searching for relevant internal links...
-                            </p>
-                          </div>
-                        ) : internalLinkSuggestions.length > 0 ? (
-                          <div>
-                            <div className="mb-3 p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
-                              <p className="text-sm font-medium text-green-800 dark:text-green-200">
-                                ✅ Found {internalLinkSuggestions.length} relevant internal link{internalLinkSuggestions.length !== 1 ? 's' : ''} for your content
-                              </p>
-                            </div>
-                            <div className="space-y-2 max-h-96 overflow-y-auto">
-                              {internalLinkSuggestions.map((suggestion, index) => (
-                                <div key={index} className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600 hover:border-blue-300 dark:hover:border-blue-600 transition-colors">
-                                  <div className="flex items-start justify-between">
-                                    <div className="flex-1 mr-3">
-                                      <div className="flex items-center gap-2 mb-1">
-                                        <Link className="w-4 h-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />
-                                        <p className="text-sm font-medium text-gray-900 dark:text-white">
-                                          {suggestion.title}
-                                        </p>
-                                      </div>
-                                      <a
-                                        href={suggestion.url}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="text-xs text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 mb-2"
-                                      >
-                                        {suggestion.url}
-                                        <ExternalLink className="w-3 h-3" />
-                                      </a>
-                                      {suggestion.excerpt && (
-                                        <p className="text-xs text-gray-600 dark:text-gray-400 line-clamp-2">
-                                          {suggestion.excerpt}
-                                        </p>
-                                      )}
-                                    </div>
-                                    <div className="flex-shrink-0">
-                                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300">
-                                        {Math.round(suggestion.relevanceScore * 100)}% match
-                                      </span>
-                                    </div>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="mt-3 p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
-                            <div className="flex items-start">
-                              <AlertCircle className="w-5 h-5 text-yellow-600 dark:text-yellow-400 mt-0.5 mr-3 flex-shrink-0" />
-                              <div>
-                                <p className="text-sm font-medium text-yellow-800 dark:text-yellow-200">
-                                  No Indexed URLs Found
-                                </p>
-                                <p className="text-xs text-yellow-700 dark:text-yellow-300 mt-1">
-                                  This site hasn't been crawled yet. Run a sitemap crawl to enable internal link suggestions.
-                                </p>
-                                <button
-                                  onClick={() => router.push('/sitemap')}
-                                  className="mt-2 text-xs text-yellow-800 dark:text-yellow-200 underline hover:no-underline"
-                                >
-                                  Go to Sitemap Manager →
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Link Density (per 1000 words)
+                    </label>
+                    <input
+                      type="number"
+                      value={settings.internalLinkDensity}
+                      onChange={(e) => setSettings(prev => ({ ...prev, internalLinkDensity: parseInt(e.target.value) || 3 }))}
+                      min="1" max="10"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    />
                   </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Maximum Links
+                    </label>
+                    <input
+                      type="number"
+                      value={settings.maxInternalLinks}
+                      onChange={(e) => setSettings(prev => ({ ...prev, maxInternalLinks: parseInt(e.target.value) || 5 }))}
+                      min="1" max="20"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <button
+                    onClick={() => {
+                      setShowInternalLinks(!showInternalLinks);
+                      if (!showInternalLinks && internalLinkSuggestions.length === 0) loadInternalLinkSuggestions();
+                    }}
+                    className="flex items-center gap-2 text-sm text-blue-600 dark:text-blue-400 hover:underline"
+                  >
+                    {showInternalLinks ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                    {loadingSuggestions
+                      ? 'Loading links...'
+                      : internalLinkSuggestions.length > 0
+                      ? `${internalLinkSuggestions.length} links found — ${showInternalLinks ? 'hide' : 'view'}`
+                      : 'Check for available links'}
+                  </button>
+                  {linksLastUpdated && internalLinkSuggestions.length > 0 && (
+                    <span className="text-xs text-gray-500 ml-2">Updated {formatTimeAgo(linksLastUpdated)}</span>
+                  )}
+
+                  {showInternalLinks && !loadingSuggestions && internalLinkSuggestions.length > 0 && (
+                    <div className="mt-3 space-y-2 max-h-72 overflow-y-auto">
+                      {internalLinkSuggestions.map((suggestion, index) => (
+                        <div key={index} className="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600">
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1 mr-3">
+                              <p className="text-sm font-medium text-gray-900 dark:text-white">{suggestion.title}</p>
+                              <a href={suggestion.url} target="_blank" rel="noopener noreferrer"
+                                className="text-xs text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 mt-1">
+                                {suggestion.url} <ExternalLink className="w-3 h-3" />
+                              </a>
+                            </div>
+                            <span className="text-xs px-2 py-1 rounded-full bg-green-100 text-green-700">
+                              {Math.round(suggestion.relevanceScore * 100)}% match
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -1554,10 +1343,10 @@ export default function EnhancedCreateArticlePage() {
                 <button
                   onClick={proceedToGeneration}
                   disabled={!selectedSite}
-                  className="px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-3 font-medium shadow-lg hover:shadow-xl transition-all"
+                  className="px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-3 font-medium shadow-lg hover:shadow-xl transition-all"
                 >
                   <Sparkles className="w-5 h-5" />
-                  Generate Enhanced Content ({estimatedCredits.toLocaleString()} credits)
+                  Generate {CONTENT_MODES[settings.contentMode].label} ({estimatedCredits.toLocaleString()} credits)
                 </button>
               </div>
             )}
@@ -1570,43 +1359,36 @@ export default function EnhancedCreateArticlePage() {
             <div className="text-center">
               <CheckCircle className="w-16 h-16 text-green-600 mx-auto mb-4" />
               <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
-                Enhanced Content Generated Successfully!
+                {CONTENT_MODES[settings.contentMode].label} Generated Successfully!
               </h3>
               <p className="text-gray-600 dark:text-gray-400 mb-2">
-                Your content has been created with {MODEL_CONFIG[selectedModel].label}
+                Created with {MODEL_CONFIG[selectedModel].label}
               </p>
               {generatedContent.site && (
                 <p className="text-gray-600 dark:text-gray-400 mb-6">
                   Ready to publish to <span className="font-semibold">{generatedContent.site.name}</span>
                 </p>
               )}
-              
-              {/* Content Stats */}
+
               <div className="grid grid-cols-3 gap-4 max-w-2xl mx-auto mb-8">
                 <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4">
-                  <div className="text-2xl font-bold text-gray-900 dark:text-white mb-1">
-                    {generatedContent.wordCount}
-                  </div>
+                  <div className="text-2xl font-bold text-gray-900 dark:text-white mb-1">{generatedContent.wordCount}</div>
                   <div className="text-sm text-gray-600 dark:text-gray-400">Words</div>
                 </div>
                 <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4">
-                  <div className="text-2xl font-bold text-gray-900 dark:text-white mb-1">
-                    {generatedContent.readingTime}
-                  </div>
-                  <div className="text-sm text-gray-600 dark:text-gray:400">Min Read</div>
+                  <div className="text-2xl font-bold text-gray-900 dark:text-white mb-1">{generatedContent.readingTime}</div>
+                  <div className="text-sm text-gray-600 dark:text-gray-400">Min Read</div>
                 </div>
                 <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4">
-                  <div className="text-2xl font-bold text-gray-900 dark:text-white mb-1">
-                    {generatedContent.seoScore}%
-                  </div>
+                  <div className="text-2xl font-bold text-gray-900 dark:text-white mb-1">{generatedContent.seoScore}%</div>
                   <div className="text-sm text-gray-600 dark:text-gray-400">SEO Score</div>
                 </div>
               </div>
 
-              <div className="flex justify-center gap-4">
+              <div className="flex justify-center gap-4 flex-wrap">
                 <button
                   onClick={() => router.push(`/articles/${generatedContent.id}/edit`)}
-                  className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 shadow-lg hover:shadow-xl transition-all"
+                  className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
                 >
                   <Edit3 className="w-5 h-5" />
                   Edit Content
@@ -1614,15 +1396,14 @@ export default function EnhancedCreateArticlePage() {
                 <button
                   onClick={handlePublish}
                   disabled={!selectedSite}
-                  className="px-6 py-3 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2 shadow-lg hover:shadow-xl transition-all"
-                  title={!selectedSite ? 'Please select a site first' : 'Publish to WordPress'}
+                  className="px-6 py-3 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
                 >
                   <Send className="w-5 h-5" />
                   Publish Now
                 </button>
                 <button
                   onClick={() => setShowScheduleModal(true)}
-                  className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2 shadow-lg hover:shadow-xl transition-all"
+                  className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2"
                 >
                   <Calendar className="w-5 h-5" />
                   Schedule Post
@@ -1639,30 +1420,21 @@ export default function EnhancedCreateArticlePage() {
         )}
       </div>
 
-      {/* Schedule Modal */}
       {showScheduleModal && generatedContent && (
         <ScheduleModal
           isOpen={showScheduleModal}
           onClose={() => setShowScheduleModal(false)}
-          onSuccess={() => {
-            setShowScheduleModal(false);
-            router.push('/articles/schedule');
-          }}
+          onSuccess={() => { setShowScheduleModal(false); router.push('/articles/schedule'); }}
           // @ts-ignore
-          preselectedContentId={generatedContent.id} 
+          preselectedContentId={generatedContent.id}
         />
       )}
 
-      {/* Publish Progress Modal */}
       <PublishProgressModal
         isOpen={showPublishProgress}
         currentStep={publishStep}
         error={publishError}
-        onClose={() => {
-          setShowPublishProgress(false);
-          setPublishStep('validating');
-          setPublishError(null);
-        }}
+        onClose={() => { setShowPublishProgress(false); setPublishStep('validating'); setPublishError(null); }}
       />
     </DashboardLayout>
   );
