@@ -30,6 +30,7 @@ export interface User {
   maxCredits?: number;
   subscriptionStatus?: string;
   avatar?: string;
+  hasSeenTour?: boolean;
   phone?: string;
   location?: string;
   company?: string;

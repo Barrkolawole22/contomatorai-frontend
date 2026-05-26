@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import {
   LayoutDashboard,
   FileText,
@@ -26,15 +27,64 @@ import {
   ExternalLink,
   ChevronUp,
   ChevronDown,
-  BookOpen   // NEW icon for Knowledgebase
+  BookOpen,
+  MonitorSmartphone,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthProvider';
+import { authAPI } from '@/lib/api';
 import NotificationDropdown from '@/components/NotificationDropdown';
 import { notificationAPI } from '@/lib/api';
+
+// Dynamically imported so Driver.js CSS doesn't affect SSR
+const OnboardingTour = dynamic(() => import('@/components/OnboardingTour'), {
+  ssr: false,
+});
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
 }
+
+// ── Mobile Warning Banner ─────────────────────────────────────────────────
+function MobileWarningBanner() {
+  const [isMobile, setIsMobile] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 1024);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
+
+  if (!isMobile || dismissed) return null;
+
+  return (
+    <div className="w-full bg-amber-50 dark:bg-amber-900/30 border-b border-amber-200 dark:border-amber-700 px-4 py-3">
+      <div className="flex items-start gap-3 max-w-7xl mx-auto">
+        <MonitorSmartphone className="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
+            This app is optimised for desktop
+          </p>
+          <p className="text-sm text-amber-700 dark:text-amber-300 mt-0.5">
+            For the best experience on mobile, switch your browser to{' '}
+            <strong>Desktop Mode</strong>. In Chrome, tap the three-dot menu (⋮) and
+            select <strong>"Desktop site"</strong>. On Safari, tap the <strong>aA</strong> icon
+            in the address bar and select <strong>"Request Desktop Website"</strong>.
+          </p>
+        </div>
+        <button
+          onClick={() => setDismissed(true)}
+          className="flex-shrink-0 text-amber-500 hover:text-amber-700 dark:hover:text-amber-300 transition-colors p-1 rounded"
+          aria-label="Dismiss"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+    </div>
+  );
+}
+// ─────────────────────────────────────────────────────────────────────────
 
 const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
   const router = useRouter();
@@ -48,6 +98,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
   const [helpOpen, setHelpOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [debugCollapsed, setDebugCollapsed] = useState(true);
+  const [showTour, setShowTour] = useState(false);
 
   const notificationButtonRef = useRef<HTMLButtonElement>(null);
   const helpButtonRef = useRef<HTMLButtonElement>(null);
@@ -73,12 +124,35 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
   useEffect(() => {
     if (!loading && !redirectHandled) {
       if (!isAuthenticated) {
-        console.log('🔒 Redirecting to login...');
+        console.log('Redirecting to login...');
         setRedirectHandled(true);
         router.replace(`/login?redirect=${encodeURIComponent(pathname)}`);
       }
     }
   }, [loading, isAuthenticated, router, pathname, redirectHandled]);
+
+  // Determine if this is a new user and whether to show the tour.
+  // Checks server-side flag first (user.hasSeenTour), then falls back
+  // to localStorage so returning users on a new device are still covered.
+  useEffect(() => {
+    if (!isAuthenticated || !user) return;
+    const localFlag = localStorage.getItem(`tour_seen_${user.id}`);
+    const serverFlag = user.hasSeenTour;
+    if (!serverFlag && !localFlag) {
+      setShowTour(true);
+    }
+  }, [isAuthenticated, user]);
+
+  const handleTourComplete = () => {
+    setShowTour(false);
+    if (user?.id) {
+      localStorage.setItem(`tour_seen_${user.id}`, 'true');
+    }
+    // Persist server-side — fire and forget
+    authAPI.put('/auth/profile', { hasSeenTour: true }).catch((err: any) =>
+      console.error('Failed to persist tour flag:', err)
+    );
+  };
 
   // Click outside handler for dropdowns
   useEffect(() => {
@@ -103,9 +177,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [notificationOpen, helpOpen]);
 
   // Load unread notification count
@@ -140,17 +212,9 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     }
   };
 
-  const getUserCredits = () => {
-    return user?.wordCredits || user?.credits || 0;
-  };
-
-  const getUserPlan = () => {
-    return user?.plan || user?.subscription?.plan || user?.subscriptionPlan || 'Free';
-  };
-
-  const getUserUsedCredits = () => {
-    return user?.currentMonthUsage || user?.totalWordsUsed || 0;
-  };
+  const getUserCredits = () => user?.wordCredits || user?.credits || 0;
+  const getUserPlan = () => user?.plan || user?.subscription?.plan || user?.subscriptionPlan || 'Free';
+  const getUserUsedCredits = () => user?.currentMonthUsage || user?.totalWordsUsed || 0;
 
   const navigationItems = [
     {
@@ -158,80 +222,93 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
       href: '/dashboard',
       icon: LayoutDashboard,
       current: pathname === '/dashboard',
-      badge: null
+      badge: null,
+      tourId: 'nav-dashboard',
     },
     {
       name: 'Keywords',
       href: '/keywords',
       icon: Search,
       current: pathname.startsWith('/keywords'),
-      badge: null
+      badge: null,
+      tourId: 'nav-keywords',
     },
     {
       name: 'Articles',
       href: '/articles',
       icon: FileText,
       current: pathname.startsWith('/articles'),
-      badge: null
+      badge: null,
+      tourId: 'nav-articles',
     },
     {
       name: 'Pipeline',
       href: '/pipeline',
       icon: Zap,
       current: pathname.startsWith('/pipeline'),
-      badge: { text: 'Pro', color: 'bg-purple-500' }
+      badge: { text: 'Pro', color: 'bg-purple-500' },
+      tourId: null,
     },
     {
       name: 'Bulk Create',
       href: '/bulk-create',
       icon: Layers,
       current: pathname.startsWith('/bulk-create'),
-      badge: { text: 'New', color: 'bg-green-500' }
+      badge: { text: 'New', color: 'bg-green-500' },
+      tourId: 'nav-bulk-create',
     },
     {
       name: 'Knowledgebase',
       href: '/knowledgebase',
       icon: BookOpen,
       current: pathname.startsWith('/knowledgebase'),
-      badge: null
+      badge: null,
+      tourId: null,
     },
     {
       name: 'Scheduler',
       href: '/scheduler',
       icon: Calendar,
       current: pathname.startsWith('/scheduler'),
-      badge: null
+      badge: null,
+      tourId: 'nav-scheduler',
     },
     {
       name: 'Sitemap',
       href: '/dashboard/wordpress/sitemap',
       icon: Link2,
       current: pathname.startsWith('/dashboard/wordpress/sitemap'),
-      badge: null
+      badge: null,
+      tourId: null,
     },
     {
       name: 'WordPress',
       href: '/dashboard/wordpress',
       icon: Globe,
-      current: pathname.startsWith('/dashboard/wordpress') && !pathname.startsWith('/dashboard/wordpress/sitemap'),
-      badge: null
+      current:
+        pathname.startsWith('/dashboard/wordpress') &&
+        !pathname.startsWith('/dashboard/wordpress/sitemap'),
+      badge: null,
+      tourId: 'nav-wordpress',
     },
     {
       name: 'Billing',
       href: '/dashboard/billing',
       icon: CreditCard,
       current: pathname.startsWith('/dashboard/billing'),
-      badge: null
+      badge: null,
+      tourId: null,
     },
     {
       name: 'Settings',
       href: '/settings',
       icon: Settings,
       current: pathname.startsWith('/settings'),
-      badge: null
-    }
+      badge: null,
+      tourId: null,
+    },
   ];
-  // Show loading screen
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
@@ -243,18 +320,19 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     );
   }
 
-  // Don't render if not authenticated
-  if (!isAuthenticated) {
-    return null;
-  }
+  if (!isAuthenticated) return null;
 
   const userCredits = getUserCredits();
   const userPlan = getUserPlan();
   const usedCredits = getUserUsedCredits();
-  const isEnterprise = userPlan.toLowerCase() === 'enterprise';
+  const isAgency = userPlan.toLowerCase() === 'agency';
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex">
+
+      {/* Onboarding tour */}
+      <OnboardingTour isNewUser={showTour} onComplete={handleTourComplete} />
+
       {/* Mobile sidebar overlay */}
       {sidebarOpen && (
         <div className="fixed inset-0 z-40 lg:hidden">
@@ -266,18 +344,18 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
       )}
 
       {/* Sidebar */}
-      <div className={`fixed inset-y-0 left-0 z-50 w-64 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 transform transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static lg:inset-0 ${
-        sidebarOpen ? 'translate-x-0' : '-translate-x-full'
-      }`}>
+      <div
+        className={`fixed inset-y-0 left-0 z-50 w-64 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 transform transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static lg:inset-0 ${
+          sidebarOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
         {/* Logo */}
         <div className="flex items-center justify-between h-16 px-6 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center space-x-2">
             <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
               <Zap className="w-5 h-5 text-white" />
             </div>
-            <span className="text-xl font-bold text-gray-900 dark:text-white">
-              ContentAI
-            </span>
+            <span className="text-xl font-bold text-gray-900 dark:text-white">ContentAI</span>
           </div>
           <button
             onClick={() => setSidebarOpen(false)}
@@ -295,6 +373,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
               <Link
                 key={item.name}
                 href={item.href}
+                data-tour={item.tourId ?? undefined}
                 className={`flex items-center justify-between px-3 py-2 text-sm font-medium rounded-lg transition-colors group ${
                   item.current
                     ? 'bg-blue-50 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300'
@@ -335,7 +414,10 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
           </div>
 
           {/* Credits display */}
-          <div className="mb-4 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+          <div
+            data-tour="credits-display"
+            className="mb-4 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg"
+          >
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs font-medium text-gray-600 dark:text-gray-400">
                 Words Remaining
@@ -349,13 +431,16 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                 Used: {usedCredits.toLocaleString()} words
               </div>
             )}
-            {(userCredits + usedCredits) > 0 && (
+            {userCredits + usedCredits > 0 && (
               <div className="mt-2">
                 <div className="w-full bg-gray-200 dark:bg-gray-600 rounded-full h-1.5">
                   <div
                     className="bg-blue-600 h-1.5 rounded-full transition-all duration-300"
                     style={{
-                      width: `${Math.min((usedCredits / (userCredits + usedCredits)) * 100, 100)}%`
+                      width: `${Math.min(
+                        (usedCredits / (userCredits + usedCredits)) * 100,
+                        100
+                      )}%`,
                     }}
                   />
                 </div>
@@ -376,7 +461,6 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                 <Moon className="w-5 h-5 text-gray-600 dark:text-gray-400" />
               )}
             </button>
-
             <button
               onClick={logout}
               className="p-2 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-red-600 transition-colors"
@@ -390,6 +474,9 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
 
       {/* Main content */}
       <div className="flex-1 flex flex-col">
+        {/* Mobile warning banner */}
+        <MobileWarningBanner />
+
         {/* Top navigation */}
         <div className="sticky top-0 z-10 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 shadow-sm">
           <div className="flex items-center justify-between h-16 px-4 sm:px-6">
@@ -410,7 +497,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                 </span>
               </div>
 
-              {/* Quick action button - Bulk Create */}
+              {/* Quick action - Bulk Create */}
               <Link
                 href="/bulk-create"
                 className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all text-sm font-medium shadow-sm"
@@ -419,11 +506,11 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                 <span>Bulk Create</span>
               </Link>
 
-              {/* --- HELP BUTTON --- */}
+              {/* Help button */}
               <div className="relative">
                 <button
                   ref={helpButtonRef}
-                  onClick={() => setHelpOpen(o => !o)}
+                  onClick={() => setHelpOpen((o) => !o)}
                   className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 p-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                 >
                   <HelpCircle className="h-5 w-5" />
@@ -456,14 +543,25 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                         Knowledgebase
                         <ExternalLink className="w-3 h-3 inline-block ml-1" />
                       </a>
+                      {/* Replay tour */}
+                      <button
+                        onClick={() => {
+                          setHelpOpen(false);
+                          if (user?.id) localStorage.removeItem(`tour_seen_${user.id}`);
+                          setShowTour(true);
+                        }}
+                        className="block w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50"
+                      >
+                        Replay onboarding tour
+                      </button>
                       <div className="border-t border-gray-200 dark:border-gray-700 my-1"></div>
-                      {isEnterprise ? (
-                         <a
+                      {isAgency ? (
+                        <a
                           href="tel:+18005550199"
                           className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50"
                         >
                           <Phone className="w-4 h-4" />
-                          <span>Call Enterprise Support</span>
+                          <span>Call Agency Support</span>
                         </a>
                       ) : (
                         <div className="px-4 py-2 text-sm text-gray-400 dark:text-gray-500">
@@ -471,9 +569,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                             <Phone className="w-4 h-4" />
                             <span>Priority Call Line</span>
                           </p>
-                          <p className="text-xs mt-1">
-                            (Available for Enterprise plan)
-                          </p>
+                          <p className="text-xs mt-1">(Available for Agency plan)</p>
                         </div>
                       )}
                     </div>
@@ -521,26 +617,16 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
         </div>
 
         {/* Page content */}
-        <main className="flex-1 p-4 sm:p-6 overflow-y-auto">
-          {children}
-        </main>
+        <main className="flex-1 p-4 sm:p-6 overflow-y-auto">{children}</main>
 
         {/* Footer */}
         <footer className="border-t border-gray-200 dark:border-gray-700 px-6 py-4">
           <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
-            <div>
-              © 2025 ContentAI Pro. All rights reserved.
-            </div>
+            <div>© 2025 ContentAI Pro. All rights reserved.</div>
             <div className="flex items-center space-x-4">
-              <Link href="/help" className="hover:text-gray-700 dark:hover:text-gray-300">
-                Help
-              </Link>
-              <Link href="/privacy" className="hover:text-gray-700 dark:hover:text-gray-300">
-                Privacy
-              </Link>
-              <Link href="/terms" className="hover:text-gray-700 dark:hover:text-gray-300">
-                Terms
-              </Link>
+              <Link href="/help" className="hover:text-gray-700 dark:hover:text-gray-300">Help</Link>
+              <Link href="/privacy" className="hover:text-gray-700 dark:hover:text-gray-300">Privacy</Link>
+              <Link href="/terms" className="hover:text-gray-700 dark:hover:text-gray-300">Terms</Link>
             </div>
           </div>
         </footer>
@@ -560,7 +646,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
           ) : (
             <div className="bg-black bg-opacity-90 text-white p-3 rounded-lg text-xs max-w-xs shadow-xl">
               <div className="flex items-center justify-between mb-2">
-                <div className="font-bold text-green-400">🔧 Debug User Data:</div>
+                <div className="font-bold text-green-400">Debug User Data:</div>
                 <button
                   onClick={() => setDebugCollapsed(true)}
                   className="text-gray-400 hover:text-white transition-colors"
@@ -576,6 +662,8 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                 <div>Name: <span className="text-yellow-400">{user?.name}</span></div>
                 <div>Email: <span className="text-gray-400">{user?.email}</span></div>
                 <div>Unread: <span className="text-orange-400">{unreadCount}</span></div>
+                <div>Tour seen: <span className="text-green-400">{user?.hasSeenTour ? 'yes' : 'no'}</span></div>
+                <div>Show tour: <span className="text-green-400">{showTour ? 'yes' : 'no'}</span></div>
                 <div className="pt-2 border-t border-gray-700">
                   <div className="text-gray-400">Current Page:</div>
                   <div className="text-green-400 break-all">{pathname}</div>

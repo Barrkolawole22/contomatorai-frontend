@@ -236,11 +236,11 @@ export const authAPI = {
   logout:         ()          => makeRequest({ method: 'POST', url: '/auth/logout' }),
   createAdmin:    (data: any) => makeRequest({ method: 'POST', url: '/auth/create-admin', data }),
   makeAdmin:      (data: any) => makeRequest({ method: 'POST', url: '/auth/make-admin', data }),
-  get:    (url: string, config?: any)        => makeRequest({ method: 'GET',    url, ...config }),
+  get:    (url: string, config?: any)             => makeRequest({ method: 'GET',    url, ...config }),
   post:   (url: string, data?: any, config?: any) => makeRequest({ method: 'POST',   url, data, ...config }),
   put:    (url: string, data?: any, config?: any) => makeRequest({ method: 'PUT',    url, data, ...config }),
   patch:  (url: string, data?: any, config?: any) => makeRequest({ method: 'PATCH',  url, data, ...config }),
-  delete: (url: string, config?: any)        => makeRequest({ method: 'DELETE', url, ...config }),
+  delete: (url: string, config?: any)             => makeRequest({ method: 'DELETE', url, ...config }),
 };
 
 // ---------- SITES / WORDPRESS API ----------

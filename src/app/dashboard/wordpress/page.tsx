@@ -404,28 +404,6 @@ export default function WordPressSitesPage() {
                         </div>
                       </div>
                     </div>
-                    
-                    {/* Site Stats */}
-                    <div className="grid grid-cols-3 gap-4 py-4 mb-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                      <div className="text-center">
-                        <div className="text-lg font-bold text-gray-900 dark:text-white">
-                          {site.postsCount || 0}
-                        </div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400">Posts</div>
-                      </div>
-                      <div className="text-center">
-                        <div className="text-lg font-bold text-gray-900 dark:text-white">
-                          {site.categoriesCount || 0}
-                        </div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400">Categories</div>
-                      </div>
-                      <div className="text-center">
-                        <div className="text-lg font-bold text-gray-900 dark:text-white">
-                          {site.tagsCount || 0}
-                        </div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400">Tags</div>
-                      </div>
-                    </div>
 
                     {/* Last Sync Info */}
                     {site.lastSync && (

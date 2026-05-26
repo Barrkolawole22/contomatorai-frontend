@@ -23,6 +23,7 @@
     "axios": "^1.5.0",
     "bcryptjs": "^2.4.3",
     "clsx": "^2.0.0",
+    "driver.js": "^1.4.0",
     "jose": "^6.0.11",
     "js-cookie": "^3.0.5",
     "lucide-react": "^0.290.0",

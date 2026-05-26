@@ -18,6 +18,7 @@ interface PipelineConfig {
   schedule: 'hourly' | 'every_2_hours' | 'every_4_hours' | 'twice_daily' | 'three_daily' | 'daily' | 'weekly';
   niches: string[];
   relevanceTopics: string[];
+  country: string;
   targetWordCount: number;
   aiModel: 'gemini' | 'gemini-pro' | 'gpt4o' | 'claude';
   previewWindowMinutes: number;
@@ -68,6 +69,17 @@ const SCHEDULE_LABELS: Record<string, string> = {
   weekly:        'Weekly (Monday 8am)',
 };
 
+const COUNTRY_OPTIONS: { value: string; label: string; flag: string }[] = [
+  { value: 'Global', label: 'Global (All Countries)', flag: '🌍' },
+  { value: 'NG', label: 'Nigeria', flag: '🇳🇬' },
+  { value: 'US', label: 'United States', flag: '🇺🇸' },
+  { value: 'GB', label: 'United Kingdom', flag: '🇬🇧' },
+  { value: 'AU', label: 'Australia', flag: '🇦🇺' },
+  { value: 'CA', label: 'Canada', flag: '🇨🇦' },
+  { value: 'ZA', label: 'South Africa', flag: '🇿🇦' },
+  { value: 'IN', label: 'India', flag: '🇮🇳' },
+];
+
 // Preset broad topic categories for the AI relevance filter
 const RELEVANCE_PRESETS = [
   'Law & Courts', 'Crime', 'Finance', 'Health', 'Technology',
@@ -98,6 +110,7 @@ export default function PipelinePage() {
     siteId: '',
     niches: [] as string[],
     relevanceTopics: [] as string[],
+    country: 'Global',
     schedule: 'every_4_hours' as PipelineConfig['schedule'],
     aiModel: 'gemini-pro' as PipelineConfig['aiModel'],
     targetWordCount: 1200,
@@ -431,6 +444,21 @@ export default function PipelinePage() {
                 )}
               </div>
 
+              {/* Country */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Content Country *</label>
+                <select
+                  value={form.country}
+                  onChange={e => setForm(prev => ({ ...prev, country: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                >
+                  {COUNTRY_OPTIONS.map(opt => (
+                    <option key={opt.value} value={opt.value}>{opt.flag} {opt.label}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-400 mt-1">Limits news sources and AI filter to this country's content.</p>
+              </div>
+
               {/* Schedule */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Schedule</label>
@@ -464,22 +492,12 @@ export default function PipelinePage() {
                   </div>
                 )}
                 <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={nicheInput}
-                    onChange={e => setNicheInput(e.target.value)}
-                    onKeyDown={handleNicheKeyDown}
-                    onBlur={() => { if (nicheInput.trim()) addNiche(nicheInput); }}
-                    placeholder='e.g. Nigeria court ruling, EFCC arrest, Supreme Court Nigeria'
-                    className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
-                  />
-                  <button type="button" onClick={() => addNiche(nicheInput)} disabled={!nicheInput.trim()} className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40 text-sm font-medium">Add</button>
-                  <button type="button" onClick={handleDetectNiche} disabled={detectingNiche || !form.siteId} className="px-3 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 flex items-center gap-1.5 text-sm font-medium whitespace-nowrap">
+                  <button type="button" onClick={handleDetectNiche} disabled={detectingNiche || !form.siteId} className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 flex items-center gap-2 text-sm font-medium">
                     {detectingNiche ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
-                    {detectingNiche ? 'Detecting...' : 'Auto-detect'}
+                    {detectingNiche ? 'Detecting from site...' : 'Auto-detect from site'}
                   </button>
                 </div>
-                <p className="text-xs text-gray-400 mt-1">Each keyword is searched separately on news feeds. More keywords = more diverse articles per run.</p>
+                <p className="text-xs text-gray-400 mt-1">Keywords are auto-detected from your site content. Each keyword becomes a separate news search.</p>
               </div>
 
               {/* ── AI RELEVANCE FILTER ─────────────────────────────────────── */}
@@ -688,6 +706,11 @@ export default function PipelinePage() {
                           )}
                           <div className="flex items-center gap-4 mt-2 text-sm text-gray-500 dark:text-gray-400 flex-wrap">
                             <span className="flex items-center gap-1"><Globe className="w-3.5 h-3.5" />{getSiteName(pipeline.siteId)}</span>
+                            {pipeline.country && pipeline.country !== 'Global' && (
+                              <span className="flex items-center gap-1">
+                                {COUNTRY_OPTIONS.find(c => c.value === pipeline.country)?.flag} {COUNTRY_OPTIONS.find(c => c.value === pipeline.country)?.label || pipeline.country}
+                              </span>
+                            )}
                             <span className="flex items-center gap-1"><Calendar className="w-3.5 h-3.5" />{SCHEDULE_LABELS[pipeline.schedule]}</span>
                             <span className="flex items-center gap-1"><Brain className="w-3.5 h-3.5" />{MODEL_LABELS[pipeline.aiModel]}</span>
                             <span className="flex items-center gap-1"><BarChart3 className="w-3.5 h-3.5" />{pipeline.targetWordCount} words</span>
