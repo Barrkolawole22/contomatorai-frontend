@@ -23,6 +23,8 @@ interface PipelineConfig {
   aiModel: 'gemini' | 'gemini-pro' | 'gpt4o' | 'claude';
   previewWindowMinutes: number;
   maxArticlesPerRun: number;
+  enableImpactFormats?: boolean;
+  allowedImpactFormats?: string[];
   lastRunAt?: string;
   createdAt: string;
 }
@@ -87,6 +89,30 @@ const RELEVANCE_PRESETS = [
   'Entertainment', 'Real Estate', 'Science', 'Military', 'Religion',
 ];
 
+// All 20 impact formats with human-readable labels
+const IMPACT_FORMAT_OPTIONS: { value: string; label: string; description: string }[] = [
+  { value: 'rate_change_alert',      label: 'Rate Change Alert',       description: 'A rate, fee, or yield has changed' },
+  { value: 'policy_shift',           label: 'Policy Shift',            description: 'New rule, regulation, or official policy' },
+  { value: 'price_hike_survival',    label: 'Price Hike Survival',     description: 'A price increase was announced' },
+  { value: 'feature_removal_warning',label: 'Feature Removal Warning', description: 'A feature is being removed or paywalled' },
+  { value: 'new_law_breakdown',      label: 'New Law Breakdown',       description: 'A new law was passed or ruling issued' },
+  { value: 'scam_fraud_alert',       label: 'Scam / Fraud Alert',      description: 'New scam, fraud, or security threat' },
+  { value: 'product_recall_guide',   label: 'Product Recall Guide',    description: 'A product recall or safety warning' },
+  { value: 'market_crash_explainer', label: 'Market Crash Explainer',  description: 'Market drop or significant financial movement' },
+  { value: 'subscription_trap',      label: 'Subscription Trap',       description: 'Hidden fees or subscription terms revealed' },
+  { value: 'comparison_flip',        label: 'Comparison Flip',         description: 'Context changed which option is now better' },
+  { value: 'deadline_reminder',      label: 'Deadline Reminder',       description: 'Time-sensitive action with upcoming deadline' },
+  { value: 'hidden_cost_revealer',   label: 'Hidden Cost Revealer',    description: 'Full cost breakdown reveals more than advertised' },
+  { value: 'upgrade_decision',       label: 'Upgrade Decision',        description: 'New version or product triggers upgrade decision' },
+  { value: 'data_breach_response',   label: 'Data Breach Response',    description: 'A data breach or security incident announced' },
+  { value: 'trend_reality_check',    label: 'Trend Reality Check',     description: 'Viral claim or trend needs fact-checking' },
+  { value: 'beginner_entry_point',   label: 'Beginner Entry Point',    description: 'Newcomers need a clear starting point' },
+  { value: 'contract_renewal_audit', label: 'Contract Renewal Audit',  description: 'Contract or subscription renewal decision triggered' },
+  { value: 'seasonal_timing_guide',  label: 'Seasonal Timing Guide',   description: 'Timing-based advice for an action or purchase' },
+  { value: 'myth_buster',            label: 'Myth Buster',             description: 'A common misconception needs correcting' },
+  { value: 'risk_explainer',         label: 'Risk Explainer',          description: 'Risks of a decision should be explained first' },
+];
+
 export default function PipelinePage() {
   const { user } = useAuth();
   const router = useRouter();
@@ -116,6 +142,8 @@ export default function PipelinePage() {
     targetWordCount: 1200,
     previewWindowMinutes: 15,
     maxArticlesPerRun: 3,
+    enableImpactFormats: false,
+    allowedImpactFormats: [] as string[],
   });
   const [formLoading, setFormLoading] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -198,6 +226,16 @@ export default function PipelinePage() {
     if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addRelevanceTopic(relevanceInput); }
   };
 
+  // ── Impact format helpers ──────────────────────────────────────────────────
+  const toggleImpactFormat = (value: string) => {
+    setForm(prev => ({
+      ...prev,
+      allowedImpactFormats: prev.allowedImpactFormats.includes(value)
+        ? prev.allowedImpactFormats.filter(f => f !== value)
+        : [...prev.allowedImpactFormats, value],
+    }));
+  };
+
   const handleDetectNiche = async () => {
     if (!form.siteId) return;
     try {
@@ -232,6 +270,21 @@ export default function PipelinePage() {
     }
   };
 
+  const resetForm = () => {
+    setShowCreateForm(false);
+    setFormError(null);
+    setNicheSuggestions([]);
+    setNicheInput('');
+    setRelevanceInput('');
+    setForm(prev => ({
+      ...prev,
+      niches: [],
+      relevanceTopics: [],
+      enableImpactFormats: false,
+      allowedImpactFormats: [],
+    }));
+  };
+
   const handleCreate = async () => {
     if (!form.siteId || form.niches.length === 0) {
       setFormError('Site and at least one niche keyword are required');
@@ -243,11 +296,7 @@ export default function PipelinePage() {
       const res = await pipelineAPI.createPipeline(form);
       if (res.data.success) {
         setPipelines(prev => [res.data.data, ...prev]);
-        setShowCreateForm(false);
-        setNicheSuggestions([]);
-        setNicheInput('');
-        setRelevanceInput('');
-        setForm(prev => ({ ...prev, niches: [], relevanceTopics: [] }));
+        resetForm();
       } else {
         throw new Error(res.data.message || 'Failed to create pipeline');
       }
@@ -416,7 +465,7 @@ export default function PipelinePage() {
           <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Create New Pipeline</h3>
-              <button onClick={() => { setShowCreateForm(false); setFormError(null); setNicheSuggestions([]); setNicheInput(''); setRelevanceInput(''); }} className="text-gray-400 hover:text-gray-600">
+              <button onClick={resetForm} className="text-gray-400 hover:text-gray-600">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -473,11 +522,14 @@ export default function PipelinePage() {
                 </select>
               </div>
 
-              {/* Niches -- full width */}
+              {/* ── NICHES — full width ──────────────────────────────────────── */}
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Search Keywords * <span className="font-normal text-gray-400">(what to search for on Google News — press Enter or comma)</span>
+                  Search Keywords *{' '}
+                  <span className="font-normal text-gray-400">(what to search for on Google News — type and press Enter or comma)</span>
                 </label>
+
+                {/* Tags */}
                 {form.niches.length > 0 && (
                   <div className="flex flex-wrap gap-1.5 mb-2">
                     {form.niches.map(niche => (
@@ -491,14 +543,39 @@ export default function PipelinePage() {
                     ))}
                   </div>
                 )}
+
+                {/* Manual input + auto-detect */}
                 <div className="flex gap-2">
-                  <button type="button" onClick={handleDetectNiche} disabled={detectingNiche || !form.siteId} className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 flex items-center gap-2 text-sm font-medium">
+                  <input
+                    type="text"
+                    value={nicheInput}
+                    onChange={e => setNicheInput(e.target.value)}
+                    onKeyDown={handleNicheKeyDown}
+                    onBlur={() => { if (nicheInput.trim()) addNiche(nicheInput); }}
+                    placeholder="e.g. fintech Nigeria, crypto, real estate Lagos"
+                    className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => addNiche(nicheInput)}
+                    disabled={!nicheInput.trim()}
+                    className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40 text-sm font-medium"
+                  >
+                    Add
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDetectNiche}
+                    disabled={detectingNiche || !form.siteId}
+                    className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 flex items-center gap-2 text-sm font-medium"
+                  >
                     {detectingNiche ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
-                    {detectingNiche ? 'Detecting from site...' : 'Auto-detect from site'}
+                    {detectingNiche ? 'Detecting...' : 'Auto-detect'}
                   </button>
                 </div>
-                <p className="text-xs text-gray-400 mt-1">Keywords are auto-detected from your site content. Each keyword becomes a separate news search.</p>
+                <p className="text-xs text-gray-400 mt-1">Type keywords manually, or auto-detect from your site. Each keyword becomes a separate news search.</p>
               </div>
+              {/* ─────────────────────────────────────────────────────────────── */}
 
               {/* ── AI RELEVANCE FILTER ─────────────────────────────────────── */}
               <div className="md:col-span-2">
@@ -562,6 +639,68 @@ export default function PipelinePage() {
                     <p className="text-xs text-amber-600 dark:text-amber-400 mt-2 flex items-center gap-1">
                       <AlertCircle className="w-3 h-3" /> No filter set — all fetched articles will be generated. Select topics above to filter.
                     </p>
+                  )}
+                </div>
+              </div>
+              {/* ─────────────────────────────────────────────────────────────── */}
+
+              {/* ── IMPACT FORMATS ──────────────────────────────────────────── */}
+              <div className="md:col-span-2">
+                <div className="border border-gray-200 dark:border-gray-700 rounded-xl p-4 bg-gray-50 dark:bg-gray-900/30">
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center gap-2">
+                      <Zap className="w-4 h-4 text-amber-500" />
+                      <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Impact Formats</label>
+                      <span className="text-xs px-2 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded-full">New</span>
+                    </div>
+                    {/* Toggle */}
+                    <button
+                      type="button"
+                      onClick={() => setForm(prev => ({ ...prev, enableImpactFormats: !prev.enableImpactFormats }))}
+                      className={`flex-shrink-0 w-10 h-6 rounded-full transition-colors relative ${form.enableImpactFormats ? 'bg-amber-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+                    >
+                      <span className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${form.enableImpactFormats ? 'translate-x-5' : 'translate-x-1'}`} />
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                    When enabled, AI auto-detects the best content format for each article (rate alert, policy shift, scam warning, etc.) and applies a specialised structure. Leave all formats unselected to allow any format.
+                  </p>
+
+                  {form.enableImpactFormats && (
+                    <div>
+                      <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">
+                        Restrict to specific formats{' '}
+                        <span className="font-normal text-gray-400">
+                          — {form.allowedImpactFormats.length === 0 ? 'all formats allowed' : `${form.allowedImpactFormats.length} selected`}
+                        </span>
+                        {form.allowedImpactFormats.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setForm(prev => ({ ...prev, allowedImpactFormats: [] }))}
+                            className="ml-2 text-gray-400 hover:text-red-500 underline"
+                          >
+                            clear all
+                          </button>
+                        )}
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {IMPACT_FORMAT_OPTIONS.map(fmt => (
+                          <button
+                            key={fmt.value}
+                            type="button"
+                            onClick={() => toggleImpactFormat(fmt.value)}
+                            title={fmt.description}
+                            className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
+                              form.allowedImpactFormats.includes(fmt.value)
+                                ? 'bg-amber-500 text-white border-amber-500'
+                                : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-300 dark:border-gray-600 hover:border-amber-400 hover:text-amber-600 dark:hover:text-amber-400'
+                            }`}
+                          >
+                            {fmt.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   )}
                 </div>
               </div>
@@ -634,10 +773,7 @@ export default function PipelinePage() {
             </div>
 
             <div className="flex justify-end gap-3 mt-6">
-              <button
-                onClick={() => { setShowCreateForm(false); setFormError(null); setNicheSuggestions([]); setNicheInput(''); setRelevanceInput(''); }}
-                className="px-4 py-2 border border-gray-300 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700"
-              >
+              <button onClick={resetForm} className="px-4 py-2 border border-gray-300 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700">
                 Cancel
               </button>
               <button
@@ -672,6 +808,7 @@ export default function PipelinePage() {
               const pipelineId = pipeline.id || pipeline._id;
               const niches = pipeline.niches || [];
               const relevanceTopics = pipeline.relevanceTopics || [];
+              const allowedFormats = pipeline.allowedImpactFormats || [];
               return (
                 <div key={pipelineId} className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
                   <div className="p-5">
@@ -694,6 +831,12 @@ export default function PipelinePage() {
                             <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${pipeline.isActive ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'}`}>
                               {pipeline.isActive ? 'Active' : 'Paused'}
                             </span>
+                            {pipeline.enableImpactFormats && (
+                              <span className="text-xs px-2 py-0.5 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-700 rounded-full font-medium flex items-center gap-1">
+                                <Zap className="w-2.5 h-2.5" />
+                                {allowedFormats.length > 0 ? `${allowedFormats.length} format${allowedFormats.length !== 1 ? 's' : ''}` : 'All formats'}
+                              </span>
+                            )}
                           </div>
                           {/* Relevance filter tags */}
                           {relevanceTopics.length > 0 && (
