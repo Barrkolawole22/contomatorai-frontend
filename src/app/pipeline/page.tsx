@@ -86,6 +86,7 @@ const COUNTRY_OPTIONS: { value: string; label: string; flag: string }[] = [
 const RELEVANCE_PRESETS = [
   'Law & Courts', 'Crime', 'Finance', 'Health', 'Technology',
   'Politics', 'Business', 'Sports', 'Environment', 'Education',
+  'Scholarship',
   'Entertainment', 'Real Estate', 'Science', 'Military', 'Religion',
 ];
 
@@ -111,7 +112,12 @@ const IMPACT_FORMAT_OPTIONS: { value: string; label: string; description: string
   { value: 'seasonal_timing_guide',  label: 'Seasonal Timing Guide',   description: 'Timing-based advice for an action or purchase' },
   { value: 'myth_buster',            label: 'Myth Buster',             description: 'A common misconception needs correcting' },
   { value: 'risk_explainer',         label: 'Risk Explainer',          description: 'Risks of a decision should be explained first' },
+  { value: 'scholarship_new_opening',   label: 'Scholarship: New Opening',   description: 'A scholarship or fellowship has opened for applications' },
+  { value: 'scholarship_deadline_alert',label: 'Scholarship: Deadline Alert',description: 'Application deadline is approaching or announced' },
+  { value: 'scholarship_how_to_apply',  label: 'Scholarship: How to Apply',  description: 'Step-by-step application process for a specific program' },
+  { value: 'scholarship_results',       label: 'Scholarship: Results',       description: 'Scholarship winners or awardees have been announced' },
 ];
+
 
 export default function PipelinePage() {
   const { user } = useAuth();
