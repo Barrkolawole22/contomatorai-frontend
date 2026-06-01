@@ -904,9 +904,19 @@ export default function PipelinePage() {
                       ) : (
                         <div className="space-y-3">
                           {runs[pipelineId].slice(0, 5).map(run => {
-                            // Separate accepted results from AI-rejected ones
-                            const acceptedResults = run.results?.filter(r => r.status !== 'skipped' || !r.error?.toLowerCase().includes('not relevant')) ?? [];
-                            const rejectedCount = (run.results?.length ?? 0) - acceptedResults.length;
+                            // Only show articles that were actually processed (published, generated, or failed)
+                            const meaningfulResults = run.results?.filter(r =>
+                              r.status === 'published' || r.status === 'generated' || r.status === 'failed'
+                            ) ?? [];
+
+                            // Collapse skipped articles into summary counts
+                            const duplicateCount = run.results?.filter(r =>
+                              r.status === 'skipped' && r.error?.toLowerCase().includes('duplicate')
+                            ).length ?? 0;
+
+                            const filteredCount = run.results?.filter(r =>
+                              r.status === 'skipped' && r.error?.toLowerCase().includes('not relevant')
+                            ).length ?? 0;
 
                             return (
                               <div key={run.id || run._id} className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
@@ -924,27 +934,37 @@ export default function PipelinePage() {
                                   </div>
                                 </div>
 
-                                {/* Accepted results only */}
-                                {acceptedResults.length > 0 && (
+                                {/* Published / generated / failed results only */}
+                                {meaningfulResults.length > 0 && (
                                   <div className="space-y-1 mt-2">
-                                    {acceptedResults.map((result, idx) => (
-                                      <div key={idx} className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 min-w-0">
+                                    {meaningfulResults.map((result, idx) => (
+                                      <div key={idx} className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 min-w-0 overflow-hidden">
                                         {getResultIcon(result.status)}
                                         <span className="truncate min-w-0 flex-1">{result.topic}</span>
-                                        {result.error && (
-                                          <span className="text-red-500 flex-shrink-0 ml-auto">— {result.error}</span>
+                                        {result.status === 'failed' && result.error && (
+                                          <span className="text-red-500 flex-shrink-0 ml-2">— {result.error}</span>
                                         )}
                                       </div>
                                     ))}
                                   </div>
                                 )}
 
-                                {/* AI-rejected summary line */}
-                                {rejectedCount > 0 && (
-                                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-2 flex items-center gap-1">
-                                    <Filter className="w-3 h-3 flex-shrink-0" />
-                                    {rejectedCount} {rejectedCount === 1 ? 'article' : 'articles'} filtered out by AI relevance check
-                                  </p>
+                                {/* Skipped summary — one quiet line instead of individual rows */}
+                                {(duplicateCount > 0 || filteredCount > 0) && (
+                                  <div className="flex items-center gap-3 mt-2 flex-wrap">
+                                    {duplicateCount > 0 && (
+                                      <span className="flex items-center gap-1 text-xs text-gray-400 dark:text-gray-500">
+                                        <SkipForward className="w-3 h-3 flex-shrink-0" />
+                                        {duplicateCount} duplicate{duplicateCount !== 1 ? 's' : ''} skipped
+                                      </span>
+                                    )}
+                                    {filteredCount > 0 && (
+                                      <span className="flex items-center gap-1 text-xs text-gray-400 dark:text-gray-500">
+                                        <Filter className="w-3 h-3 flex-shrink-0" />
+                                        {filteredCount} AI-filtered
+                                      </span>
+                                    )}
+                                  </div>
                                 )}
 
                                 {run.runErrors?.length > 0 && (
