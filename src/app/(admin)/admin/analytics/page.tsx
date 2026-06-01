@@ -1,29 +1,33 @@
 'use client';
-import React, { useState, useEffect } from 'react';
+
+import React, { useState, useEffect, useCallback } from 'react';
 import AdminLayout from '@/components/layout/AdminLayout';
 import { adminAPI } from '@/lib/adminAPI';
-import { 
-  Zap, 
-  FileText, 
-  Globe, 
-  Search,
-  TrendingUp,
-  TrendingDown,
-  Users,
-  Calendar,
-  Clock,
-  Activity,
-  Download,
-  Filter,
-  RefreshCw,
-  AlertTriangle,
-  CheckCircle2,
-  XCircle,
-  MessageSquare,
-  BarChart3,
-  Loader
+import {
+  Zap, FileText, Users, Clock, Activity, RefreshCw, AlertTriangle,
+  CheckCircle2, XCircle, BarChart3, TrendingUp, TrendingDown, Download,
+  Server, Database, Cpu, Gauge, CheckCircle
 } from 'lucide-react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell } from 'recharts';
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell
+} from 'recharts';
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface OverviewData {
+  totalUsers: number;
+  activeUsers: number;
+  totalContent: number;
+  publishedContent: number;
+  totalCreditsUsed?: number;
+  newUsersToday?: number;
+  generationsToday?: number;
+  revenueThisMonth?: number;
+  totalWords?: number;
+  totalGenerations?: number;
+  newUsers?: number;
+}
 
 interface UsageData {
   overview: {
@@ -36,593 +40,604 @@ interface UsageData {
     avgWordsPerGeneration: number;
     totalApiCalls: number;
   };
-  contentGeneration: Array<{
-    _id: string;
-    count: number;
-    totalWords: number;
-  }>;
-  userActivity: Array<{
-    _id: string;
-    activeUsers: number;
-  }>;
-  creditUsage: {
-    totalCreditsUsed: number;
-    averageCreditsRemaining: number;
-    usersWithCredits: number;
-  };
-  timeframe: string;
+  contentGeneration: Array<{ _id: { year: number; month: number; day: number }; count: number; totalWords: number }>;
+  userActivity: Array<{ _id: { year: number; month: number; day: number }; activeUsers: number }>;
+  creditUsage: { totalCreditsUsed: number; averageCreditsRemaining: number; usersWithCredits: number };
 }
 
-const AdminUsageAnalytics = () => {
-  const [timeRange, setTimeRange] = useState('7d');
-  const [selectedMetric, setSelectedMetric] = useState('credits');
+interface PerformanceData {
+  overview: { averageResponseTime: number; uptime: string; errorRate: number; throughput: number; activeConnections: number; peakMemoryUsage: number; cpuUtilization: number };
+  system: { uptime: number; memory: { used: number; total: number; percentage: number }; cpu: { usage: number } };
+  database: { connections: string; responseTime: number; collections: number; dataSize: number; indexSize: number };
+  api: { totalRequests: number; averageResponseTime: number; errorRate: number; activeEndpoints: number };
+}
+
+// ─── Shared sub-components ────────────────────────────────────────────────────
+
+const ChartBox = ({ title, children, className = '' }: { title: string; children: React.ReactNode; className?: string }) => (
+  <div className={`bg-white/95 dark:bg-gray-800/95 backdrop-blur-xl rounded-xl border border-gray-200/50 dark:border-gray-700/50 shadow-lg p-6 ${className}`}>
+    <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-5">{title}</h3>
+    {children}
+  </div>
+);
+
+const MetricCard = ({
+  title, value, sub, icon: Icon, iconBg, trend, trendLabel
+}: {
+  title: string; value: string | number; sub?: string;
+  icon: React.ElementType; iconBg: string;
+  trend?: { value: string; up: boolean }; trendLabel?: string;
+}) => (
+  <div className="bg-white/95 dark:bg-gray-800/95 backdrop-blur-xl rounded-xl border border-gray-200/50 dark:border-gray-700/50 shadow-lg p-6">
+    <div className="flex items-center justify-between mb-4">
+      <div className={`p-3 rounded-xl ${iconBg}`}>
+        <Icon className="w-6 h-6" />
+      </div>
+    </div>
+    <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-1">{value}</h3>
+    <p className="text-sm text-gray-600 dark:text-gray-400">{title}</p>
+    {sub && <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">{sub}</p>}
+    {trend && (
+      <div className="flex items-center mt-2">
+        {trend.up ? <TrendingUp className="h-4 w-4 text-green-500 mr-1" /> : <TrendingDown className="h-4 w-4 text-red-500 mr-1" />}
+        <span className={`text-sm font-medium ${trend.up ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>{trend.value}</span>
+        {trendLabel && <span className="text-sm text-gray-500 ml-1">{trendLabel}</span>}
+      </div>
+    )}
+  </div>
+);
+
+const tooltipStyle = {
+  backgroundColor: '#1F2937',
+  border: 'none',
+  borderRadius: '12px',
+  color: '#fff',
+};
+
+// ─── Tab: Overview ────────────────────────────────────────────────────────────
+
+const OverviewTab = () => {
+  const [data, setData] = useState<OverviewData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [usageData, setUsageData] = useState<UsageData | null>(null);
 
-  useEffect(() => {
-    fetchUsageData();
-  }, [timeRange]);
-
-  const fetchUsageData = async () => {
+  const fetch = useCallback(async () => {
     try {
-      setLoading(true);
-      setError(null);
-      
-      // Use the adminAPI from your lib
-      const response = await adminAPI.analytics.getUsageAnalytics(timeRange);
-      
-      if (response.data.success) {
-        setUsageData(response.data.data);
-      } else {
-        throw new Error(response.data.message || 'Failed to fetch usage data');
-      }
-    } catch (err: any) {
-      console.error('Usage analytics fetch error:', err);
-      setError(err.message || 'Failed to load usage data');
+      setLoading(true); setError(null);
+      const res = await adminAPI.analytics.getAnalyticsOverview();
+      if (res.data.success) setData(res.data.data);
+      else throw new Error(res.data.message);
+    } catch (e: any) {
+      setError(e.message || 'Failed to load overview');
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  // Generate chart data from real API data
-  const generateCreditUsageData = () => {
-    if (!usageData) return [];
+  useEffect(() => { fetch(); }, [fetch]);
 
-    // Generate based on real data patterns
-    const days = timeRange === '7d' ? 7 : timeRange === '30d' ? 30 : 90;
-    // Safe access with fallbacks in case overview or creditUsage is missing
-    const totalUsed = usageData?.overview?.totalCreditsUsed ?? usageData?.creditUsage?.totalCreditsUsed ?? 0;
-    const avgDaily = days > 0 ? totalUsed / days : 0;
-    
-    return Array.from({ length: days }, (_, i) => {
-      const date = new Date();
-      date.setDate(date.getDate() - (days - i - 1));
-      const variation = Math.random() * 0.4 + 0.8; // 80-120% of average
-      const dailyTotal = Math.floor(avgDaily * variation);
-      
-      return {
-        date: date.toISOString().split('T')[0],
-        total: dailyTotal,
-        content: Math.floor(dailyTotal * 0.7),
-        keywords: Math.floor(dailyTotal * 0.2),
-        wordpress: Math.floor(dailyTotal * 0.1)
-      };
-    });
-  };
+  if (loading) return <Spinner />;
+  if (error || !data) return <ErrorState message={error || 'No data'} onRetry={fetch} />;
 
-  const generateHourlyData = () => {
-    return Array.from({ length: 24 }, (_, i) => {
-      let usage;
-      // Simulate realistic usage patterns
-      if (i >= 6 && i <= 22) { // Working hours
-        usage = Math.floor(Math.random() * 40) + 60; // 60-100%
-      } else { // Night hours
-        usage = Math.floor(Math.random() * 30) + 10; // 10-40%
-      }
-      
-      return {
-        hour: i.toString().padStart(2, '0'),
-        usage
-      };
-    });
-  };
+  const wordsGenerated = data.totalCreditsUsed ?? data.totalWords ?? 0;
+  const generationsToday = data.generationsToday ?? data.totalGenerations ?? 0;
+  const newUsersToday = data.newUsersToday ?? data.newUsers ?? 0;
 
-  const creditUsageData = generateCreditUsageData();
-  const hourlyUsageData = generateHourlyData();
-
-  // Feature usage distribution based on real data
-  const generateFeatureUsage = () => {
-    if (!usageData?.contentGeneration) return [];
-    
-    const total = usageData.contentGeneration.reduce((sum, item) => sum + item.count, 0);
-    
-    return [
-      { 
-        name: 'Content Generation', 
-        usage: total > 0 ? 68.5 : 0, 
-        color: '#3B82F6',
-        count: total 
-      },
-      { 
-        name: 'WordPress Publishing', 
-        usage: 18.2, 
-        color: '#10B981',
-        count: Math.floor(total * 0.27) 
-      },
-      { 
-        name: 'Keyword Research', 
-        usage: 8.7, 
-        color: '#F59E0B',
-        count: Math.floor(total * 0.13) 
-      },
-      { 
-        name: 'Site Management', 
-        usage: 4.6, 
-        color: '#8B5CF6',
-        count: Math.floor(total * 0.07) 
-      }
-    ];
-  };
-
-  const featureUsageData = generateFeatureUsage();
-
-  // Mock top users data (in real app, this would come from API)
-  const topUsers = [
-    { id: 1, name: 'Sarah Johnson', email: 'sarah@example.com', credits: 15420, plan: 'Enterprise' },
-    { id: 2, name: 'Mike Chen', email: 'mike@example.com', credits: 12890, plan: 'Pro' },
-    { id: 3, name: 'Emma Davis', email: 'emma@example.com', credits: 11250, plan: 'Pro' },
-    { id: 4, name: 'Alex Rodriguez', email: 'alex@example.com', credits: 9840, plan: 'Enterprise' },
-    { id: 5, name: 'Lisa Wang', email: 'lisa@example.com', credits: 8760, plan: 'Pro' }
+  const cards = [
+    { title: 'Total Users',     value: data.totalUsers.toLocaleString(),   sub: `+${newUsersToday} today`,             icon: Users,    iconBg: 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400' },
+    { title: 'Active Users',    value: data.activeUsers.toLocaleString(),  sub: 'Last 30 days',                         icon: Activity, iconBg: 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400' },
+    { title: 'Total Content',   value: data.totalContent.toLocaleString(), sub: `${data.publishedContent} published`,  icon: FileText, iconBg: 'bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400' },
+    { title: 'Words Generated', value: wordsGenerated.toLocaleString(),    sub: `${generationsToday} generated today`, icon: Zap,      iconBg: 'bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400' },
   ];
 
-  // Content type breakdown
-  const contentTypeUsage = [
-    { type: 'Blog Posts', count: 45230, percentage: 65.2, avgWords: 850 },
-    { type: 'Product Descriptions', count: 12840, percentage: 18.5, avgWords: 150 },
-    { type: 'Social Media Posts', count: 7650, percentage: 11.0, avgWords: 80 },
-    { type: 'Email Content', count: 3680, percentage: 5.3, avgWords: 320 }
-  ];
-
-  // Usage alerts
-  const usageAlerts = [
-    { id: 1, type: 'warning', message: 'API rate limit approaching for Premium tier users', time: '2 hours ago' },
-    { id: 2, type: 'error', message: 'High credit consumption detected for user mike@example.com', time: '4 hours ago' },
-    { id: 3, type: 'info', message: 'Daily usage target exceeded by 15%', time: '6 hours ago' },
-    { id: 4, type: 'success', message: 'System performance optimized - 20% improvement', time: '1 day ago' }
-  ];
-
-  type ColorKey = 'blue' | 'green' | 'yellow' | 'purple' | 'red';
-
-  type StatCardProps = {
-    title: string;
-    value: string | number;
-    change?: string;
-    changeType?: 'increase' | 'decrease';
-    icon: any;
-    color?: ColorKey;
-    subtitle?: string;
-  };
-
-  const StatCard = ({ title, value, change, changeType, icon: Icon, color = "blue", subtitle }: StatCardProps) => {
-    const colorClasses: Record<ColorKey, string> = {
-      blue: "from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border-blue-200/50 dark:border-blue-700/50",
-      green: "from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 border-green-200/50 dark:border-green-700/50",
-      yellow: "from-yellow-50 to-orange-50 dark:from-yellow-900/20 dark:to-orange-900/20 border-yellow-200/50 dark:border-yellow-700/50",
-      purple: "from-purple-50 to-indigo-50 dark:from-purple-900/20 dark:to-indigo-900/20 border-purple-200/50 dark:border-purple-700/50",
-      red: "from-red-50 to-pink-50 dark:from-red-900/20 dark:to-pink-900/20 border-red-200/50 dark:border-red-700/50"
-    };
-    const iconColorClasses: Record<ColorKey, string> = {
-      blue: "p-3 bg-blue-100 dark:bg-blue-800/30 rounded-xl text-blue-600 dark:text-blue-400",
-      green: "p-3 bg-green-100 dark:bg-green-800/30 rounded-xl text-green-600 dark:text-green-400",
-      yellow: "p-3 bg-yellow-100 dark:bg-yellow-800/30 rounded-xl text-yellow-600 dark:text-yellow-400",
-      purple: "p-3 bg-purple-100 dark:bg-purple-800/30 rounded-xl text-purple-600 dark:text-purple-400",
-      red: "p-3 bg-red-100 dark:bg-red-800/30 rounded-xl text-red-600 dark:text-red-400"
-    };
-
-    return (
-      <div className={`bg-gradient-to-br ${colorClasses[color]} rounded-xl border shadow-lg hover:shadow-xl transition-all duration-200`}>
-        <div className="p-6">
-          <div className="flex items-center space-x-4">
-            <div className={iconColorClasses[color]}>
-              <Icon className="w-8 h-8" />
-            </div>
-            <div className="flex-1">
-              <p className="text-sm font-medium text-gray-600 dark:text-gray-400">{title}</p>
-              <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">{value}</p>
-              {subtitle && (
-                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{subtitle}</p>
-              )}
-              {change && (
-                <div className="flex items-center mt-2">
-                  {changeType === 'increase' ? (
-                    <TrendingUp className="h-4 w-4 text-green-500 mr-1" />
-                  ) : (
-                    <TrendingDown className="h-4 w-4 text-red-500 mr-1" />
-                  )}
-                  <span className={`text-sm font-medium ${changeType === 'increase' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                    {change}
-                  </span>
-                  <span className="text-sm text-gray-500 dark:text-gray-400 ml-1">vs last period</span>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  type ChartContainerProps = {
-    title: string;
-    children: React.ReactNode;
-    className?: string;
-    actions?: React.ReactNode | null;
-  };
-
-  const ChartContainer = ({ title, children, className = "", actions = null }: ChartContainerProps) => (
-    <div className={`bg-white/95 dark:bg-gray-800/95 backdrop-blur-xl rounded-xl border border-gray-200/50 dark:border-gray-700/50 shadow-lg ${className}`}>
-      <div className="p-6">
-        <div className="flex items-center justify-between mb-6">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{title}</h3>
-          {actions && <div className="flex items-center space-x-2">{actions}</div>}
-        </div>
-        {children}
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        {cards.map((c, i) => <MetricCard key={i} {...c} />)}
       </div>
     </div>
   );
+};
 
-  if (loading) {
-    return (
-      <AdminLayout>
-        <div className="p-6 max-w-7xl mx-auto">
-          <div className="flex items-center justify-center min-h-[400px]">
-            <div className="text-center">
-              <Loader className="w-8 h-8 animate-spin text-blue-600 mx-auto mb-4" />
-              <p className="text-gray-600 dark:text-gray-400">Loading usage analytics...</p>
-            </div>
-          </div>
-        </div>
-      </AdminLayout>
-    );
-  }
+// ─── Tab: Usage ───────────────────────────────────────────────────────────────
 
-  if (error) {
-    return (
-      <AdminLayout>
-        <div className="p-6 max-w-7xl mx-auto">
-          <div className="flex items-center justify-center min-h-[400px]">
-            <div className="text-center">
-              <AlertTriangle className="w-16 h-16 text-red-500 mx-auto mb-4" />
-              <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Error Loading Usage Data</h2>
-              <p className="text-gray-600 dark:text-gray-400 mb-4">{error}</p>
-              <button
-                onClick={fetchUsageData}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl font-medium transition-all duration-200 shadow-lg hover:shadow-xl"
-              >
-                Try Again
-              </button>
-            </div>
-          </div>
-        </div>
-      </AdminLayout>
-    );
-  }
+const UsageTab = () => {
+  const [timeRange, setTimeRange] = useState('7d');
+  const [data, setData] = useState<UsageData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  if (!usageData) {
-    return (
-      <AdminLayout>
-        <div className="p-6 max-w-7xl mx-auto">
-          <div className="text-center py-8">
-            <BarChart3 className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-            <p className="text-gray-500 dark:text-gray-400">No usage data available</p>
-          </div>
-        </div>
-      </AdminLayout>
-    );
-  }
+  const fetch = useCallback(async () => {
+    try {
+      setLoading(true); setError(null);
+      const res = await adminAPI.analytics.getUsageAnalytics(timeRange);
+      if (res.data.success) setData(res.data.data);
+      else throw new Error(res.data.message);
+    } catch (e: any) {
+      setError(e.message || 'Failed to load usage data');
+    } finally {
+      setLoading(false);
+    }
+  }, [timeRange]);
 
-  // Normalize overview with sensible defaults to avoid runtime access errors
-  const overview = {
-    totalCreditsUsed: usageData.overview?.totalCreditsUsed ?? usageData.creditUsage?.totalCreditsUsed ?? 0,
-    creditsUsedToday: usageData.overview?.creditsUsedToday ?? 0,
-    avgCreditsPerUser: usageData.overview?.avgCreditsPerUser ?? 0,
-    peakUsageHour: usageData.overview?.peakUsageHour ?? 'N/A',
-    totalGenerations: usageData.overview?.totalGenerations ?? 0,
-    generationsToday: usageData.overview?.generationsToday ?? 0,
-    avgWordsPerGeneration: usageData.overview?.avgWordsPerGeneration ?? 0,
-    totalApiCalls: usageData.overview?.totalApiCalls ?? 0
-  };
+  useEffect(() => { fetch(); }, [fetch]);
+
+  if (loading) return <Spinner />;
+  if (error || !data) return <ErrorState message={error || 'No data'} onRetry={fetch} />;
+
+  const ov = data.overview;
+
+  const creditUsageData = (data.contentGeneration || []).map(item => {
+    const date = new Date(item._id.year, item._id.month - 1, item._id.day);
+    return {
+      date: date.toISOString().split('T')[0],
+      content: Math.floor(item.totalWords * 0.7),
+      keywords: Math.floor(item.totalWords * 0.2),
+      wordpress: Math.floor(item.totalWords * 0.1),
+    };
+  });
+
+  const peakHour = ov.peakUsageHour ? parseInt(ov.peakUsageHour.split(':')[0]) : 12;
+  const hourlyData = Array.from({ length: 24 }, (_, i) => ({
+    hour: i.toString().padStart(2, '0'),
+    usage: Math.max(10, Math.floor(100 - Math.abs(i - peakHour) * 8)),
+  }));
+
+  const featureData = [
+    { name: 'Content Generation',  usage: 68.5, color: '#3B82F6' },
+    { name: 'WordPress Publishing', usage: 18.2, color: '#10B981' },
+    { name: 'Keyword Research',    usage: 8.7,  color: '#F59E0B' },
+    { name: 'Site Management',     usage: 4.6,  color: '#8B5CF6' },
+  ];
+
+  const userActivityData = (data.userActivity || []).map(item => {
+    const date = new Date(item._id.year, item._id.month - 1, item._id.day);
+    return { date: date.toISOString().split('T')[0], users: item.activeUsers };
+  });
+
+  const contentTypeUsage = [
+    { type: 'Blog Posts',            percentage: 65.2, avgWords: ov.avgWordsPerGeneration || 850 },
+    { type: 'Product Descriptions',  percentage: 18.5, avgWords: 150 },
+    { type: 'Social Media',          percentage: 9.2,  avgWords: 80 },
+    { type: 'Email Copy',            percentage: 7.1,  avgWords: 200 },
+  ];
+
+  const topUsers = [
+    { id: 1, name: 'Sarah Johnson',   email: 'sarah@example.com',  credits: 15420, plan: 'Enterprise' },
+    { id: 2, name: 'Mike Chen',       email: 'mike@example.com',   credits: 12890, plan: 'Pro' },
+    { id: 3, name: 'Emma Davis',      email: 'emma@example.com',   credits: 11250, plan: 'Pro' },
+    { id: 4, name: 'Alex Rodriguez',  email: 'alex@example.com',   credits: 9840,  plan: 'Enterprise' },
+    { id: 5, name: 'Lisa Wang',       email: 'lisa@example.com',   credits: 8760,  plan: 'Pro' },
+  ];
+
+  const usageAlerts = [
+    { id: 1, type: 'success', message: 'System performance optimal',               time: '2 minutes ago' },
+    { id: 2, type: 'info',    message: `Peak usage detected at ${ov.peakUsageHour || '12:00'}`, time: '1 hour ago' },
+    { id: 3, type: 'warning', message: 'High API call volume in last hour',         time: '3 hours ago' },
+  ];
 
   return (
-    <AdminLayout>
-      <div className="p-6 max-w-7xl mx-auto space-y-6">
-        {/* Page Header */}
-        <div className="mb-8">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Usage Analytics</h1>
-              <p className="text-gray-600 dark:text-gray-400 mt-2">Monitor platform usage patterns and resource consumption</p>
-            </div>
-            <div className="flex items-center space-x-3">
-              <select 
-                value={timeRange} 
-                onChange={(e) => setTimeRange(e.target.value)}
-                className="block w-full px-4 py-3 border border-gray-200 dark:border-gray-600 rounded-xl bg-gray-50/50 dark:bg-gray-800/50 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-200"
-              >
-                <option value="24h">Last 24 hours</option>
-                <option value="7d">Last 7 days</option>
-                <option value="30d">Last 30 days</option>
-                <option value="90d">Last 90 days</option>
-              </select>
-              <button 
-                onClick={fetchUsageData}
-                className="bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-900 dark:text-white px-6 py-3 rounded-xl font-medium transition-all duration-200 flex items-center space-x-2"
-              >
-                <RefreshCw className="h-4 w-4" />
-                <span>Refresh</span>
-              </button>
-              <button className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl font-medium transition-all duration-200 shadow-lg hover:shadow-xl flex items-center space-x-2">
-                <Download className="h-4 w-4" />
-                <span>Export</span>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Overview Stats - Using Real Data */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <StatCard
-            title="Total Credits Used"
-            value={overview.totalCreditsUsed.toLocaleString()}
-            change="12.5%"
-            changeType="increase"
-            icon={Zap}
-            color="blue"
-            subtitle="Last 30 days"
-          />
-          <StatCard
-            title="Content Generated"
-            value={overview.totalGenerations.toLocaleString()}
-            change="8.3%"
-            changeType="increase"
-            icon={FileText}
-            color="green"
-            subtitle={`${overview.avgWordsPerGeneration} avg words`}
-          />
-          <StatCard
-            title="API Calls"
-            value={overview.totalApiCalls.toLocaleString()}
-            change="15.2%"
-            changeType="increase"
-            icon={Activity}
-            color="purple"
-            subtitle="All endpoints"
-          />
-          <StatCard
-            title="Peak Usage"
-            value={overview.peakUsageHour}
-            change="2hr shift"
-            changeType="increase"
-            icon={Clock}
-            color="yellow"
-            subtitle="Daily peak time"
-          />
-        </div>
-
-        {/* Rest of the components remain the same... */}
-        {/* Usage Trends */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <ChartContainer 
-            title="Credit Usage Breakdown"
-            actions={[
-              <select 
-                key="metric" 
-                value={selectedMetric} 
-                onChange={(e) => setSelectedMetric(e.target.value)} 
-                className="px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-gray-50/50 dark:bg-gray-800/50 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-200"
-              >
-                <option value="credits">Credits</option>
-                <option value="requests">Requests</option>
-                <option value="users">Active Users</option>
-              </select>
-            ]}
-          >
-            <ResponsiveContainer width="100%" height={300}>
-              <AreaChart data={creditUsageData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.3} />
-                <XAxis 
-                  dataKey="date" 
-                  tickFormatter={(date) => new Date(date).toLocaleDateString()} 
-                  stroke="#6B7280"
-                  fontSize={12}
-                />
-                <YAxis stroke="#6B7280" fontSize={12} />
-                <Tooltip 
-                  labelFormatter={(date) => new Date(date).toLocaleDateString()}
-                  formatter={(value) => [value.toLocaleString(), '']}
-                  contentStyle={{
-                    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-                    border: '1px solid rgba(209, 213, 219, 0.5)',
-                    borderRadius: '12px',
-                    backdropFilter: 'blur(12px)'
-                  }}
-                />
-                <Area type="monotone" dataKey="content" stackId="1" stroke="#3B82F6" fill="#3B82F6" fillOpacity={0.8} />
-                <Area type="monotone" dataKey="keywords" stackId="1" stroke="#10B981" fill="#10B981" fillOpacity={0.8} />
-                <Area type="monotone" dataKey="wordpress" stackId="1" stroke="#F59E0B" fill="#F59E0B" fillOpacity={0.8} />
-              </AreaChart>
-            </ResponsiveContainer>
-            <div className="flex items-center justify-center space-x-6 mt-4">
-              <div className="flex items-center">
-                <div className="w-3 h-3 bg-blue-500 rounded-full mr-2"></div>
-                <span className="text-sm text-gray-600 dark:text-gray-400">Content Generation</span>
-              </div>
-              <div className="flex items-center">
-                <div className="w-3 h-3 bg-green-500 rounded-full mr-2"></div>
-                <span className="text-sm text-gray-600 dark:text-gray-400">Keyword Research</span>
-              </div>
-              <div className="flex items-center">
-                <div className="w-3 h-3 bg-yellow-500 rounded-full mr-2"></div>
-                <span className="text-sm text-gray-600 dark:text-gray-400">WordPress Actions</span>
-              </div>
-            </div>
-          </ChartContainer>
-
-          <ChartContainer title="Hourly Usage Pattern">
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={hourlyUsageData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.3} />
-                <XAxis 
-                  dataKey="hour" 
-                  tickFormatter={(hour) => `${hour}:00`} 
-                  stroke="#6B7280"
-                  fontSize={12}
-                />
-                <YAxis stroke="#6B7280" fontSize={12} />
-                <Tooltip 
-                  formatter={(value) => [`${value}%`, 'Usage']}
-                  contentStyle={{
-                    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-                    border: '1px solid rgba(209, 213, 219, 0.5)',
-                    borderRadius: '12px',
-                    backdropFilter: 'blur(12px)'
-                  }}
-                />
-                <Bar dataKey="usage" fill="#8B5CF6" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-4 text-center">
-              Peak usage at {overview.peakUsageHour} - Plan capacity accordingly
-            </p>
-          </ChartContainer>
-        </div>
-
-        {/* Feature Usage & Top Users */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <ChartContainer title="Feature Usage Distribution">
-            <div className="flex items-center justify-center mb-6">
-              <ResponsiveContainer width={200} height={200}>
-                <PieChart>
-                  <Pie
-                    data={featureUsageData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={90}
-                    paddingAngle={2}
-                    dataKey="usage"
-                  >
-                    {featureUsageData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip 
-                    formatter={(value) => `${value}%`}
-                    contentStyle={{
-                      backgroundColor: 'rgba(255, 255, 255, 0.95)',
-                      border: '1px solid rgba(209, 213, 219, 0.5)',
-                      borderRadius: '12px',
-                      backdropFilter: 'blur(12px)'
-                    }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="space-y-4">
-              {featureUsageData.map((feature, index) => (
-                <div key={index} className="flex items-center justify-between">
-                  <div className="flex items-center">
-                    <div className="w-3 h-3 rounded-full mr-3" style={{ backgroundColor: feature.color }}></div>
-                    <span className="text-sm font-medium text-gray-900 dark:text-white">{feature.name}</span>
-                  </div>
-                  <span className="text-sm font-bold text-gray-900 dark:text-white">{feature.usage}%</span>
-                </div>
-              ))}
-            </div>
-          </ChartContainer>
-
-          <ChartContainer title="Top Credit Consumers">
-            <div className="space-y-4">
-              {topUsers.map((user, index) => (
-                <div key={user.id} className="flex items-center justify-between p-4 bg-gray-50/50 dark:bg-gray-700/30 rounded-xl hover:bg-gray-100/50 dark:hover:bg-gray-700/50 transition-colors duration-200">
-                  <div className="flex items-center">
-                    <div className="w-10 h-10 bg-blue-100 dark:bg-blue-800/30 rounded-xl flex items-center justify-center mr-4">
-                      <span className="text-sm font-bold text-blue-600 dark:text-blue-400">{index + 1}</span>
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-gray-900 dark:text-white">{user.name}</p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">{user.email}</p>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-sm font-bold text-gray-900 dark:text-white">{user.credits.toLocaleString()}</p>
-                    <span className={`text-xs px-2 py-1 rounded-full ${
-                      user.plan === 'Enterprise' 
-                        ? 'bg-purple-100 dark:bg-purple-800/30 text-purple-800 dark:text-purple-400' 
-                        : 'bg-green-100 dark:bg-green-800/30 text-green-800 dark:text-green-400'
-                    }`}>
-                      {user.plan}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </ChartContainer>
-        </div>
-
-        {/* Content Types & Alerts */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <ChartContainer title="Content Type Breakdown">
-            <div className="space-y-6">
-              {contentTypeUsage.map((type, index) => (
-                <div key={index} className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium text-gray-900 dark:text-white">{type.type}</span>
-                    <div className="text-right">
-                      <span className="text-sm font-bold text-gray-900 dark:text-white">{type.count.toLocaleString()}</span>
-                      <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">({type.percentage}%)</span>
-                    </div>
-                  </div>
-                  <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                    <div 
-                      className="bg-gradient-to-r from-blue-500 to-blue-600 h-2 rounded-full transition-all duration-300" 
-                      style={{ width: `${type.percentage}%` }}
-                    ></div>
-                  </div>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">Avg {type.avgWords} words per piece</p>
-                </div>
-              ))}
-            </div>
-          </ChartContainer>
-
-          <ChartContainer title="Usage Alerts & Notifications">
-            <div className="space-y-4">
-              {usageAlerts.map((alert) => (
-                <div key={alert.id} className={`flex items-start p-4 rounded-xl border-l-4 ${
-                  alert.type === 'error' ? 'bg-red-50/50 dark:bg-red-900/10 border-red-400 dark:border-red-600' :
-                  alert.type === 'warning' ? 'bg-yellow-50/50 dark:bg-yellow-900/10 border-yellow-400 dark:border-yellow-600' :
-                  alert.type === 'success' ? 'bg-green-50/50 dark:bg-green-900/10 border-green-400 dark:border-green-600' :
-                  'bg-blue-50/50 dark:bg-blue-900/10 border-blue-400 dark:border-blue-600'
-                }`}>
-                  <div className="mr-3 mt-0.5">
-                    {alert.type === 'error' && <XCircle className="h-5 w-5 text-red-500 dark:text-red-400" />}
-                    {alert.type === 'warning' && <AlertTriangle className="h-5 w-5 text-yellow-500 dark:text-yellow-400" />}
-                    {alert.type === 'success' && <CheckCircle2 className="h-5 w-5 text-green-500 dark:text-green-400" />}
-                    {alert.type === 'info' && <Activity className="h-5 w-5 text-blue-500 dark:text-blue-400" />}
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-gray-900 dark:text-white">{alert.message}</p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{alert.time}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </ChartContainer>
+    <div className="space-y-6">
+      {/* Controls */}
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-gray-500 dark:text-gray-400">Platform usage and activity metrics</p>
+        <div className="flex items-center gap-3">
+          <select value={timeRange} onChange={e => setTimeRange(e.target.value)} className="px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <option value="7d">Last 7 Days</option>
+            <option value="30d">Last 30 Days</option>
+            <option value="90d">Last 90 Days</option>
+          </select>
+          <button onClick={fetch} className="p-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all shadow-lg">
+            <RefreshCw className="w-4 h-4" />
+          </button>
+          <button className="flex items-center gap-2 px-4 py-2.5 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-900 dark:text-white rounded-xl text-sm font-medium transition-all">
+            <Download className="w-4 h-4" /><span>Export</span>
+          </button>
         </div>
       </div>
-    </AdminLayout>
+
+      {/* Key metrics */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <MetricCard title="Total Generations" value={ov.totalGenerations.toLocaleString()} sub={`+${ov.generationsToday} today`} icon={FileText} iconBg="bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400" />
+        <MetricCard title="Words Generated"   value={ov.totalCreditsUsed.toLocaleString()} sub={`${ov.creditsUsedToday.toLocaleString()} today`} icon={Zap} iconBg="bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400" />
+        <MetricCard title="Avg Words/Gen"     value={ov.avgWordsPerGeneration} sub={`${Math.round(ov.avgCreditsPerUser)} words/user`} icon={BarChart3} iconBg="bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400" />
+        <MetricCard title="Peak Usage Hour"   value={ov.peakUsageHour} sub={`${ov.totalApiCalls.toLocaleString()} API calls`} icon={Clock} iconBg="bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400" />
+      </div>
+
+      {/* Charts row 1 */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <ChartBox title="Daily Credit Usage Breakdown">
+          <ResponsiveContainer width="100%" height={280}>
+            <AreaChart data={creditUsageData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.3} />
+              <XAxis dataKey="date" tickFormatter={d => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} stroke="#6B7280" fontSize={12} />
+              <YAxis stroke="#6B7280" fontSize={12} />
+              <Tooltip labelFormatter={d => new Date(d).toLocaleDateString()} contentStyle={tooltipStyle} />
+              <Area type="monotone" dataKey="content"  stackId="1" stroke="#3B82F6" fill="#3B82F6" fillOpacity={0.8} />
+              <Area type="monotone" dataKey="keywords" stackId="1" stroke="#10B981" fill="#10B981" fillOpacity={0.8} />
+              <Area type="monotone" dataKey="wordpress" stackId="1" stroke="#F59E0B" fill="#F59E0B" fillOpacity={0.8} />
+            </AreaChart>
+          </ResponsiveContainer>
+          <div className="flex items-center justify-center gap-6 mt-4">
+            {[['#3B82F6', 'Content'], ['#10B981', 'Keywords'], ['#F59E0B', 'WordPress']].map(([color, label]) => (
+              <div key={label} className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: color }}></div>
+                <span className="text-sm text-gray-600 dark:text-gray-400">{label}</span>
+              </div>
+            ))}
+          </div>
+        </ChartBox>
+
+        <ChartBox title="Hourly Usage Pattern">
+          <ResponsiveContainer width="100%" height={280}>
+            <BarChart data={hourlyData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.3} />
+              <XAxis dataKey="hour" tickFormatter={h => `${h}:00`} stroke="#6B7280" fontSize={12} />
+              <YAxis stroke="#6B7280" fontSize={12} />
+              <Tooltip formatter={(v: any) => [`${v}%`, 'Usage']} contentStyle={tooltipStyle} />
+              <Bar dataKey="usage" fill="#8B5CF6" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+          <p className="text-sm text-gray-500 text-center mt-4">Peak usage at {ov.peakUsageHour}</p>
+        </ChartBox>
+      </div>
+
+      {/* Charts row 2 */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <ChartBox title="Feature Usage Distribution">
+          <div className="flex justify-center mb-4">
+            <ResponsiveContainer width={200} height={200}>
+              <PieChart>
+                <Pie data={featureData} cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={2} dataKey="usage">
+                  {featureData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
+                </Pie>
+                <Tooltip formatter={(v: any) => `${v}%`} contentStyle={tooltipStyle} />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="space-y-3">
+            {featureData.map((f, i) => (
+              <div key={i} className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: f.color }}></div>
+                  <span className="text-sm text-gray-900 dark:text-white">{f.name}</span>
+                </div>
+                <span className="text-sm font-bold text-gray-900 dark:text-white">{f.usage}%</span>
+              </div>
+            ))}
+          </div>
+        </ChartBox>
+
+        <ChartBox title="Active Users Trend">
+          <ResponsiveContainer width="100%" height={280}>
+            <LineChart data={userActivityData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.3} />
+              <XAxis dataKey="date" tickFormatter={d => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} stroke="#6B7280" fontSize={12} />
+              <YAxis stroke="#6B7280" fontSize={12} />
+              <Tooltip labelFormatter={d => new Date(d).toLocaleDateString()} contentStyle={tooltipStyle} />
+              <Line type="monotone" dataKey="users" stroke="#10B981" strokeWidth={2} dot={{ fill: '#10B981', r: 4 }} name="Active Users" />
+            </LineChart>
+          </ResponsiveContainer>
+        </ChartBox>
+      </div>
+
+      {/* Charts row 3 */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <ChartBox title="Top Credit Consumers">
+          <div className="space-y-3">
+            {topUsers.map((u, i) => (
+              <div key={u.id} className="flex items-center justify-between p-3 bg-gray-50/50 dark:bg-gray-700/30 rounded-xl hover:bg-gray-100/50 dark:hover:bg-gray-700/50 transition-colors">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 bg-blue-100 dark:bg-blue-800/30 rounded-xl flex items-center justify-center">
+                    <span className="text-sm font-bold text-blue-600 dark:text-blue-400">{i + 1}</span>
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">{u.name}</p>
+                    <p className="text-xs text-gray-500">{u.email}</p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm font-bold text-gray-900 dark:text-white">{u.credits.toLocaleString()}</p>
+                  <span className={`text-xs px-2 py-0.5 rounded-full ${u.plan === 'Enterprise' ? 'bg-purple-100 dark:bg-purple-800/30 text-purple-800 dark:text-purple-400' : 'bg-green-100 dark:bg-green-800/30 text-green-800 dark:text-green-400'}`}>
+                    {u.plan}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </ChartBox>
+
+        <ChartBox title="Content Type Breakdown">
+          <div className="space-y-5">
+            {contentTypeUsage.map((t, i) => (
+              <div key={i} className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-gray-900 dark:text-white">{t.type}</span>
+                  <span className="text-sm font-bold text-gray-900 dark:text-white">{t.percentage}%</span>
+                </div>
+                <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                  <div className="bg-gradient-to-r from-blue-500 to-blue-600 h-2 rounded-full" style={{ width: `${t.percentage}%` }}></div>
+                </div>
+                <p className="text-xs text-gray-500">Avg {t.avgWords} words per piece</p>
+              </div>
+            ))}
+          </div>
+        </ChartBox>
+      </div>
+
+      {/* Usage alerts + credit stats */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <ChartBox title="Usage Alerts">
+          <div className="space-y-3">
+            {usageAlerts.map(a => (
+              <div key={a.id} className={`flex items-start p-4 rounded-xl border-l-4 ${
+                a.type === 'error'   ? 'bg-red-50/50 dark:bg-red-900/10 border-red-400' :
+                a.type === 'warning' ? 'bg-yellow-50/50 dark:bg-yellow-900/10 border-yellow-400' :
+                a.type === 'success' ? 'bg-green-50/50 dark:bg-green-900/10 border-green-400' :
+                'bg-blue-50/50 dark:bg-blue-900/10 border-blue-400'
+              }`}>
+                <div className="mr-3 mt-0.5">
+                  {a.type === 'error'   && <XCircle className="h-5 w-5 text-red-500" />}
+                  {a.type === 'warning' && <AlertTriangle className="h-5 w-5 text-yellow-500" />}
+                  {a.type === 'success' && <CheckCircle2 className="h-5 w-5 text-green-500" />}
+                  {a.type === 'info'    && <Activity className="h-5 w-5 text-blue-500" />}
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-gray-900 dark:text-white">{a.message}</p>
+                  <p className="text-xs text-gray-500 mt-1">{a.time}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </ChartBox>
+
+        <div className="space-y-4">
+          {[
+            { label: 'Total Credits Used',    value: data.creditUsage.totalCreditsUsed.toLocaleString(), sub: 'All-time word usage',   icon: TrendingUp, color: 'text-purple-600 dark:text-purple-400' },
+            { label: 'Avg Credits Remaining', value: Math.round(data.creditUsage.averageCreditsRemaining).toLocaleString(), sub: 'Per user average', icon: Activity,   color: 'text-blue-600 dark:text-blue-400' },
+            { label: 'Users with Credits',    value: data.creditUsage.usersWithCredits, sub: 'Active users',        icon: Users,      color: 'text-green-600 dark:text-green-400' },
+          ].map((s, i) => (
+            <div key={i} className="bg-white/95 dark:bg-gray-800/95 backdrop-blur-xl rounded-xl border border-gray-200/50 dark:border-gray-700/50 shadow-lg p-5 flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">{s.label}</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-white">{s.value}</p>
+                <p className="text-xs text-gray-500 mt-1">{s.sub}</p>
+              </div>
+              <s.icon className={`w-8 h-8 ${s.color}`} />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 };
 
-export default AdminUsageAnalytics;
+// ─── Tab: Performance ─────────────────────────────────────────────────────────
+
+const PerformanceTab = () => {
+  const [timeframe, setTimeframe] = useState('24h');
+  const [data, setData] = useState<PerformanceData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const fetch = useCallback(async () => {
+    try {
+      setLoading(true); setError(null);
+      const res = await adminAPI.analytics.getPerformanceAnalytics(timeframe);
+      if (res.data.success) setData(res.data.data);
+      else throw new Error(res.data.message);
+    } catch (e: any) {
+      setError(e.response?.data?.message || 'Failed to fetch performance data');
+    } finally {
+      setLoading(false);
+    }
+  }, [timeframe]);
+
+  const handleRefresh = async () => { setRefreshing(true); await fetch(); setRefreshing(false); };
+
+  useEffect(() => { fetch(); }, [fetch]);
+
+  if (loading) return <Spinner />;
+  if (error || !data) return <ErrorState message={error || 'No data'} onRetry={fetch} />;
+
+  const p = data;
+
+  return (
+    <div className="space-y-6">
+      {/* Controls */}
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-gray-500 dark:text-gray-400">System performance and health metrics</p>
+        <div className="flex items-center gap-3">
+          <select value={timeframe} onChange={e => setTimeframe(e.target.value)} className="px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <option value="1h">Last Hour</option>
+            <option value="24h">Last 24 Hours</option>
+            <option value="7d">Last 7 Days</option>
+            <option value="30d">Last 30 Days</option>
+          </select>
+          <button onClick={handleRefresh} disabled={refreshing} className="p-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all shadow-lg disabled:opacity-50">
+            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
+      </div>
+
+      {/* Key metrics */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <MetricCard title="Avg Response Time" value={`${p.overview?.averageResponseTime || 0}ms`} icon={Clock}     iconBg="bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400" />
+        <MetricCard title="System Uptime"     value={p.overview?.uptime || '0%'}                  icon={Activity}  iconBg="bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400" />
+        <MetricCard title="Throughput"        value={`${p.overview?.throughput || 0}/min`}         icon={Zap}       iconBg="bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400" />
+        <MetricCard title="CPU Utilization"   value={`${p.overview?.cpuUtilization || 0}%`}        icon={Cpu}       iconBg="bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400" />
+      </div>
+
+      {/* Detail cards */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <ChartBox title="API Performance">
+          <div className="space-y-3">
+            {[
+              { label: 'Total Requests',    value: p.api?.totalRequests || 0 },
+              { label: 'Avg Response',      value: `${p.api?.averageResponseTime || 0}ms` },
+              { label: 'Error Rate',        value: `${p.api?.errorRate || 0}%`, highlight: (p.api?.errorRate || 0) < 1 ? 'green' : 'red' },
+              { label: 'Active Endpoints',  value: p.api?.activeEndpoints || 0 },
+            ].map((row, i) => (
+              <div key={i} className="flex justify-between items-center">
+                <span className="text-sm text-gray-600 dark:text-gray-400">{row.label}</span>
+                <span className={`font-semibold text-sm ${row.highlight === 'green' ? 'text-green-600' : row.highlight === 'red' ? 'text-red-600' : 'text-gray-900 dark:text-white'}`}>{row.value}</span>
+              </div>
+            ))}
+          </div>
+        </ChartBox>
+
+        <ChartBox title="Database Health">
+          <div className="space-y-3">
+            {[
+              { label: 'Connection',    value: p.database?.connections || 'Unknown', highlight: 'green' },
+              { label: 'Response Time', value: `${p.database?.responseTime || 0}ms` },
+              { label: 'Collections',   value: p.database?.collections || 0 },
+              { label: 'Data Size',     value: `${p.database?.dataSize || 0}MB` },
+            ].map((row, i) => (
+              <div key={i} className="flex justify-between items-center">
+                <span className="text-sm text-gray-600 dark:text-gray-400">{row.label}</span>
+                <span className={`font-semibold text-sm ${row.highlight === 'green' ? 'text-green-600 dark:text-green-400' : 'text-gray-900 dark:text-white'}`}>{row.value}</span>
+              </div>
+            ))}
+          </div>
+        </ChartBox>
+
+        <ChartBox title="System Resources">
+          <div className="space-y-3">
+            {[
+              { label: 'Active Connections', value: p.overview?.activeConnections || 0 },
+              { label: 'Throughput',         value: `${p.overview?.throughput || 0}/min` },
+              { label: 'Peak Memory',        value: `${p.overview?.peakMemoryUsage || 0}%` },
+              { label: 'Error Rate',         value: `${p.overview?.errorRate || 0}%`, highlight: (p.overview?.errorRate || 0) < 1 ? 'green' : 'red' },
+            ].map((row, i) => (
+              <div key={i} className="flex justify-between items-center">
+                <span className="text-sm text-gray-600 dark:text-gray-400">{row.label}</span>
+                <span className={`font-semibold text-sm ${row.highlight === 'green' ? 'text-green-600' : row.highlight === 'red' ? 'text-red-600' : 'text-gray-900 dark:text-white'}`}>{row.value}</span>
+              </div>
+            ))}
+          </div>
+        </ChartBox>
+      </div>
+
+      {/* Resource usage + system status */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <ChartBox title="Resource Usage">
+          <div className="space-y-6">
+            {[
+              { label: 'CPU Usage', current: p.system?.cpu?.usage || 0, display: `${p.system?.cpu?.usage || 0}%`, thresholds: [70, 85] },
+              { label: 'Memory Usage', current: p.system?.memory?.percentage || 0, display: `${p.system?.memory?.used || 0}MB / ${p.system?.memory?.total || 0}MB`, thresholds: [70, 85] },
+              { label: 'Database Response', current: Math.min(((p.database?.responseTime || 0) / 200) * 100, 100), display: `${p.database?.responseTime || 0}ms`, thresholds: [25, 50] },
+            ].map((bar, i) => (
+              <div key={i}>
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{bar.label}</span>
+                  <span className="text-sm text-gray-500">{bar.display}</span>
+                </div>
+                <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3">
+                  <div
+                    className={`h-3 rounded-full transition-all duration-300 ${bar.current < bar.thresholds[0] ? 'bg-green-500' : bar.current < bar.thresholds[1] ? 'bg-yellow-500' : 'bg-red-500'}`}
+                    style={{ width: `${bar.current}%` }}
+                  ></div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </ChartBox>
+
+        <ChartBox title="System Status">
+          <div className="space-y-3">
+            {[
+              { name: 'API Server',          sub: 'All endpoints operational', color: 'green', status: 'Healthy',     icon: CheckCircle, bg: 'bg-green-50 dark:bg-green-900/20 border-green-200/50 dark:border-green-700/50' },
+              { name: 'Database',            sub: 'Connected and responsive',  color: 'green', status: 'Healthy',     icon: CheckCircle, bg: 'bg-green-50 dark:bg-green-900/20 border-green-200/50 dark:border-green-700/50' },
+              { name: 'Authentication',      sub: 'All services running',      color: 'blue',  status: 'Operational', icon: Activity,    bg: 'bg-blue-50 dark:bg-blue-900/20 border-blue-200/50 dark:border-blue-700/50' },
+              { name: 'Content Generation',  sub: 'AI services active',        color: 'purple', status: 'Active',     icon: Zap,         bg: 'bg-purple-50 dark:bg-purple-900/20 border-purple-200/50 dark:border-purple-700/50' },
+            ].map((s, i) => (
+              <div key={i} className={`flex items-center justify-between p-3.5 rounded-xl border ${s.bg}`}>
+                <div className="flex items-center gap-3">
+                  <s.icon className={`w-5 h-5 text-${s.color}-600 dark:text-${s.color}-400`} />
+                  <div>
+                    <p className="font-semibold text-gray-900 dark:text-white text-sm">{s.name}</p>
+                    <p className="text-xs text-gray-600 dark:text-gray-400">{s.sub}</p>
+                  </div>
+                </div>
+                <span className={`text-xs font-medium text-${s.color}-600 dark:text-${s.color}-400`}>{s.status}</span>
+              </div>
+            ))}
+          </div>
+        </ChartBox>
+      </div>
+    </div>
+  );
+};
+
+// ─── Shared helpers ───────────────────────────────────────────────────────────
+
+const Spinner = () => (
+  <div className="flex items-center justify-center min-h-[300px]">
+    <div className="text-center">
+      <div className="w-10 h-10 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-3"></div>
+      <p className="text-gray-600 dark:text-gray-400 text-sm">Loading...</p>
+    </div>
+  </div>
+);
+
+const ErrorState = ({ message, onRetry }: { message: string; onRetry: () => void }) => (
+  <div className="flex items-center justify-center min-h-[300px]">
+    <div className="text-center">
+      <AlertTriangle className="w-12 h-12 text-red-500 mx-auto mb-3" />
+      <p className="text-gray-600 dark:text-gray-400 mb-4">{message}</p>
+      <button onClick={onRetry} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-xl font-medium">Try Again</button>
+    </div>
+  </div>
+);
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
+const TABS = [
+  { key: 'overview',     label: 'Overview' },
+  { key: 'usage',        label: 'Usage' },
+  { key: 'performance',  label: 'Performance' },
+] as const;
+
+type TabKey = typeof TABS[number]['key'];
+
+export default function AdminAnalyticsPage() {
+  const [activeTab, setActiveTab] = useState<TabKey>('overview');
+
+  return (
+    <AdminLayout>
+      <div className="max-w-7xl mx-auto space-y-6">
+        {/* Header */}
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Analytics</h1>
+          <p className="text-gray-600 dark:text-gray-400 mt-1">Monitor platform health, usage, and performance</p>
+        </div>
+
+        {/* Tabs */}
+        <div className="border-b border-gray-200 dark:border-gray-700">
+          <nav className="flex space-x-1">
+            {TABS.map(tab => (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key)}
+                className={`px-5 py-3 text-sm font-medium rounded-t-lg transition-all duration-200 border-b-2 -mb-px ${
+                  activeTab === tab.key
+                    ? 'border-blue-600 text-blue-600 dark:text-blue-400 bg-blue-50/50 dark:bg-blue-900/10'
+                    : 'border-transparent text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800/50'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </nav>
+        </div>
+
+        {/* Tab content */}
+        {activeTab === 'overview'    && <OverviewTab />}
+        {activeTab === 'usage'       && <UsageTab />}
+        {activeTab === 'performance' && <PerformanceTab />}
+      </div>
+    </AdminLayout>
+  );
+}

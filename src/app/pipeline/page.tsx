@@ -903,44 +903,58 @@ export default function PipelinePage() {
                         <p className="text-sm text-gray-500 dark:text-gray-400">No runs yet. Click "Run Now" to trigger the pipeline manually.</p>
                       ) : (
                         <div className="space-y-3">
-                          {runs[pipelineId].slice(0, 5).map(run => (
-                            <div key={run.id || run._id} className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-                              <div className="flex items-center justify-between mb-2">
-                                <div className="flex items-center gap-3">
-                                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${getRunStatusColor(run.status)}`}>
-                                    {run.status === 'running' && <RefreshCw className="w-3 h-3 inline mr-1 animate-spin" />}
-                                    {run.status}
-                                  </span>
-                                  <span className="text-sm text-gray-500 dark:text-gray-400">{formatDate(run.runAt)}</span>
+                          {runs[pipelineId].slice(0, 5).map(run => {
+                            // Separate accepted results from AI-rejected ones
+                            const acceptedResults = run.results?.filter(r => r.status !== 'skipped' || !r.error?.toLowerCase().includes('not relevant')) ?? [];
+                            const rejectedCount = (run.results?.length ?? 0) - acceptedResults.length;
+
+                            return (
+                              <div key={run.id || run._id} className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+                                <div className="flex items-center justify-between mb-2">
+                                  <div className="flex items-center gap-3">
+                                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${getRunStatusColor(run.status)}`}>
+                                      {run.status === 'running' && <RefreshCw className="w-3 h-3 inline mr-1 animate-spin" />}
+                                      {run.status}
+                                    </span>
+                                    <span className="text-sm text-gray-500 dark:text-gray-400">{formatDate(run.runAt)}</span>
+                                  </div>
+                                  <div className="flex items-center gap-3 text-sm text-gray-500 dark:text-gray-400">
+                                    <span className="flex items-center gap-1"><FileText className="w-3.5 h-3.5" />{run.articlesGenerated} generated</span>
+                                    <span className="flex items-center gap-1"><Send className="w-3.5 h-3.5" />{run.articlesPublished} published</span>
+                                  </div>
                                 </div>
-                                <div className="flex items-center gap-3 text-sm text-gray-500 dark:text-gray-400">
-                                  <span className="flex items-center gap-1"><FileText className="w-3.5 h-3.5" />{run.articlesGenerated} generated</span>
-                                  <span className="flex items-center gap-1"><Send className="w-3.5 h-3.5" />{run.articlesPublished} published</span>
-                                </div>
+
+                                {/* Accepted results only */}
+                                {acceptedResults.length > 0 && (
+                                  <div className="space-y-1 mt-2">
+                                    {acceptedResults.map((result, idx) => (
+                                      <div key={idx} className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 min-w-0">
+                                        {getResultIcon(result.status)}
+                                        <span className="truncate min-w-0 flex-1">{result.topic}</span>
+                                        {result.error && (
+                                          <span className="text-red-500 flex-shrink-0 ml-auto">— {result.error}</span>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+
+                                {/* AI-rejected summary line */}
+                                {rejectedCount > 0 && (
+                                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-2 flex items-center gap-1">
+                                    <Filter className="w-3 h-3 flex-shrink-0" />
+                                    {rejectedCount} {rejectedCount === 1 ? 'article' : 'articles'} filtered out by AI relevance check
+                                  </p>
+                                )}
+
+                                {run.runErrors?.length > 0 && (
+                                  <div className="mt-2 p-2 bg-red-50 dark:bg-red-900/20 rounded text-xs text-red-600 dark:text-red-400">
+                                    {run.runErrors.join('; ')}
+                                  </div>
+                                )}
                               </div>
-                              {run.results?.length > 0 && (
-                                <div className="space-y-1 mt-2">
-                                  {run.results.map((result, idx) => (
-                                    <div key={idx} className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
-                                      {getResultIcon(result.status)}
-                                      <span className="truncate">{result.topic}</span>
-                                      {result.status === 'skipped' && (
-                                        <span className="text-yellow-500 ml-auto flex-shrink-0 truncate max-w-xs">{result.error || 'skipped'}</span>
-                                      )}
-                                      {result.error && result.status !== 'skipped' && (
-                                        <span className="text-red-500 ml-auto flex-shrink-0">— {result.error}</span>
-                                      )}
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                              {run.runErrors?.length > 0 && (
-                                <div className="mt-2 p-2 bg-red-50 dark:bg-red-900/20 rounded text-xs text-red-600 dark:text-red-400">
-                                  {run.runErrors.join('; ')}
-                                </div>
-                              )}
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       )}
                     </div>
