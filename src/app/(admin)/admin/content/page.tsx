@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import AdminLayout from '@/components/layout/AdminLayout';
 import { adminAPI } from '@/lib/adminAPI';
 import {
-  FileText, Search, Eye, Edit, Trash2, CheckCircle, Clock,
+  FileText, Search, Eye, Trash2, CheckCircle, Clock,
   AlertTriangle, Star, Calendar, User, RefreshCw
 } from 'lucide-react';
 
@@ -16,11 +16,7 @@ interface Content {
   type: string;
   wordCount: number;
   createdAt: string;
-  userId: {
-    _id: string;
-    name: string;
-    email: string;
-  };
+  userId: { _id: string; name: string; email: string };
 }
 
 interface ContentStats {
@@ -36,6 +32,7 @@ const AdminContentPage = () => {
   const [statistics, setStatistics] = useState<ContentStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -71,6 +68,24 @@ const AdminContentPage = () => {
 
   const handleRefresh = async () => { setRefreshing(true); await fetchContent(); setRefreshing(false); };
 
+  const handleDelete = async (id: string) => {
+    if (!confirm('Delete this content? This cannot be undone.')) return;
+    try {
+      setDeletingId(id);
+      const res = await adminAPI.content.deleteContent(id);
+      if (res.data.success) {
+        setContent(prev => prev.filter(c => c._id !== id));
+        if (statistics) setStatistics(prev => prev ? { ...prev, totalContent: prev.totalContent - 1 } : null);
+      } else {
+        throw new Error(res.data.message);
+      }
+    } catch (err: any) {
+      alert(err.response?.data?.message || err.message || 'Failed to delete content');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   const getStatusBadge = (status: string) => {
     const styles: Record<string, string> = {
       published: 'bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-400',
@@ -93,7 +108,7 @@ const AdminContentPage = () => {
             <AlertTriangle className="w-16 h-16 text-red-500 mx-auto mb-4" />
             <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Error Loading Content</h2>
             <p className="text-gray-600 dark:text-gray-400 mb-4">{error}</p>
-            <button onClick={fetchContent} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-medium transition-all shadow-lg">
+            <button onClick={fetchContent} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-medium">
               Try Again
             </button>
           </div>
@@ -106,7 +121,6 @@ const AdminContentPage = () => {
     <AdminLayout>
       <div className="max-w-7xl mx-auto space-y-6">
 
-        {/* Header */}
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Content Management</h1>
@@ -122,7 +136,6 @@ const AdminContentPage = () => {
           </button>
         </div>
 
-        {/* Stats */}
         {statistics && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
             {[
@@ -147,7 +160,6 @@ const AdminContentPage = () => {
           </div>
         )}
 
-        {/* Filters */}
         <div className="bg-white/95 dark:bg-gray-800/95 backdrop-blur-xl rounded-xl border border-gray-200/50 dark:border-gray-700/50 shadow-lg p-5">
           <div className="flex flex-col lg:flex-row gap-4">
             <div className="flex-1 relative">
@@ -163,7 +175,7 @@ const AdminContentPage = () => {
             <select
               value={filters.status}
               onChange={e => setFilters({ ...filters, status: e.target.value })}
-              className="px-4 py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl bg-gray-50/50 dark:bg-gray-800/50 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-sm"
+              className="px-4 py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl bg-gray-50/50 dark:bg-gray-800/50 text-gray-900 dark:text-white focus:outline-none text-sm"
             >
               <option value="">All Status</option>
               <option value="published">Published</option>
@@ -174,7 +186,7 @@ const AdminContentPage = () => {
             <select
               value={filters.type}
               onChange={e => setFilters({ ...filters, type: e.target.value })}
-              className="px-4 py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl bg-gray-50/50 dark:bg-gray-800/50 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-sm"
+              className="px-4 py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl bg-gray-50/50 dark:bg-gray-800/50 text-gray-900 dark:text-white focus:outline-none text-sm"
             >
               <option value="">All Types</option>
               <option value="post">Post</option>
@@ -185,7 +197,6 @@ const AdminContentPage = () => {
           </div>
         </div>
 
-        {/* Table */}
         <div className="bg-white/95 dark:bg-gray-800/95 backdrop-blur-xl rounded-xl border border-gray-200/50 dark:border-gray-700/50 shadow-lg overflow-hidden">
           {loading ? (
             <div className="p-12 text-center">
@@ -204,9 +215,7 @@ const AdminContentPage = () => {
                 <thead className="bg-gray-50/50 dark:bg-gray-700/30">
                   <tr>
                     {['Content', 'Status', 'Author', 'Created', 'Actions'].map(h => (
-                      <th key={h} className="px-6 py-4 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        {h}
-                      </th>
+                      <th key={h} className="px-6 py-4 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -224,17 +233,15 @@ const AdminContentPage = () => {
                           </div>
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        {getStatusBadge(item.status)}
-                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">{getStatusBadge(item.status)}</td>
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-2.5">
                           <div className="w-8 h-8 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center flex-shrink-0">
                             <User className="w-4 h-4 text-gray-500 dark:text-gray-400" />
                           </div>
                           <div className="min-w-0">
-                            <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{item.userId.name}</p>
-                            <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{item.userId.email}</p>
+                            <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{item.userId?.name}</p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{item.userId?.email}</p>
                           </div>
                         </div>
                       </td>
@@ -254,16 +261,15 @@ const AdminContentPage = () => {
                             <Eye className="w-4 h-4" />
                           </button>
                           <button
-                            className="p-2 text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-all"
-                            title="Edit"
-                          >
-                            <Edit className="w-4 h-4" />
-                          </button>
-                          <button
-                            className="p-2 text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all"
+                            onClick={() => handleDelete(item._id)}
+                            disabled={deletingId === item._id}
+                            className="p-2 text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all disabled:opacity-50"
                             title="Delete"
                           >
-                            <Trash2 className="w-4 h-4" />
+                            {deletingId === item._id
+                              ? <RefreshCw className="w-4 h-4 animate-spin" />
+                              : <Trash2 className="w-4 h-4" />
+                            }
                           </button>
                         </div>
                       </td>
@@ -274,7 +280,6 @@ const AdminContentPage = () => {
             </div>
           )}
 
-          {/* Pagination */}
           {totalPages > 1 && (
             <div className="bg-gray-50/50 dark:bg-gray-700/30 px-6 py-4 border-t border-gray-200/50 dark:border-gray-700/50">
               <div className="flex items-center justify-between">
@@ -282,20 +287,8 @@ const AdminContentPage = () => {
                   Page <span className="font-semibold">{currentPage}</span> of <span className="font-semibold">{totalPages}</span>
                 </p>
                 <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                    disabled={currentPage === 1}
-                    className="px-4 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-xl text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    Previous
-                  </button>
-                  <button
-                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                    disabled={currentPage === totalPages}
-                    className="px-4 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-xl text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    Next
-                  </button>
+                  <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="px-4 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-xl text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed">Previous</button>
+                  <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="px-4 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-xl text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed">Next</button>
                 </div>
               </div>
             </div>
