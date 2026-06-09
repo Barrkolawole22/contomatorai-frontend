@@ -93,13 +93,8 @@ class AuthAPI {
     });
 
     const data = await this.handleResponse<RegisterResponse>(response);
-    
-    // Store token in localStorage
-    if (data.success && data.token) {
-      localStorage.setItem('token', data.token);
-      localStorage.setItem('user', JSON.stringify(data.user));
-    }
-    
+    // NOTE: Backend returns { success, message, requiresVerification: true } on register.
+    // No token is issued until email is verified — tokens are NOT stored here.
     return data;
   }
 
@@ -122,7 +117,7 @@ class AuthAPI {
         headers: this.getAuthHeaders(),
       });
     } catch (error) {
-      console.error('Logout error:', error);
+      if (process.env.NODE_ENV === 'development') console.error('Logout error:', error);
     } finally {
       // Clear local storage regardless of API call success
       localStorage.removeItem('token');

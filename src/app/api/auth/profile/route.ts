@@ -1,57 +1,41 @@
 export const dynamic = 'force-dynamic';
-import { NextResponse } from 'next/server';
-import { verifyToken } from '@/lib/jwt';
-import { prisma } from '@/lib/prisma';
-import { cookies } from 'next/headers';
+// src/app/api/auth/profile/route.ts
+// Proxies /api/auth/profile → backend /api/auth/me
+// The previous version imported @/lib/jwt and @/lib/prisma which do not exist
+// in the frontend — those imports have been removed.
 
-export async function GET(request: Request) {
+import { NextRequest, NextResponse } from 'next/server';
+import { headers } from 'next/headers';
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+
+export async function GET(request: NextRequest) {
   try {
-    // 1. Get token from cookies
-    const token = cookies().get('auth-token')?.value;
-    if (!token) {
+    const headersList = headers();
+    const authorization = headersList.get('authorization');
+
+    if (!authorization) {
       return NextResponse.json(
-        { success: false, message: 'Not authenticated' },
+        { success: false, message: 'Authorization header required' },
         { status: 401 }
       );
     }
 
-    // 2. Verify token
-    const decoded = await verifyToken(token);
-    if (!decoded?.userId) {
-      return NextResponse.json(
-        { success: false, message: 'Invalid token' },
-        { status: 403 }
-      );
-    }
-
-    // 3. Fetch user from PostgreSQL
-    const user = await prisma.user.findUnique({
-      where: { id: decoded.userId },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        createdAt: true
-      }
+    const response = await fetch(`${API_BASE_URL}/auth/me`, {
+      method: 'GET',
+      headers: {
+        Authorization: authorization,
+        'Content-Type': 'application/json',
+      },
     });
 
-    if (!user) {
-      return NextResponse.json(
-        { success: false, message: 'User not found' },
-        { status: 404 }
-      );
-    }
+    const data = await response.json();
 
-    // 4. Return user data
-    return NextResponse.json(
-      { success: true, data: user },
-      { status: 200 }
-    );
-
+    return NextResponse.json(data, { status: response.status });
   } catch (error) {
-    console.error('Profile API Error:', error);
+    console.error('Auth profile GET error:', error);
     return NextResponse.json(
-      { success: false, message: 'Internal server error' },
+      { success: false, message: 'Failed to fetch profile' },
       { status: 500 }
     );
   }

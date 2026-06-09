@@ -36,10 +36,6 @@ export default function LoginPage() {
   // Smart redirect logic with admin detection
   useEffect(() => {
     if (isAuthenticated && !authLoading && !hasRedirected) {
-      console.log('🔄 User authenticated, determining redirect...', {
-        isAdmin,
-        redirect: searchParams?.get('redirect')
-      });
       
       setHasRedirected(true);
       
@@ -48,13 +44,10 @@ export default function LoginPage() {
       
       if (redirectParam) {
         redirectPath = redirectParam;
-        console.log('📍 Using redirect parameter:', redirectPath);
       } else {
         redirectPath = getDefaultRoute();
-        console.log('🎯 Using role-based route:', redirectPath);
       }
       
-      console.log('🚀 Redirecting to:', redirectPath);
       router.replace(redirectPath);
     }
   }, [isAuthenticated, authLoading, hasRedirected, isAdmin, getDefaultRoute, router, searchParams]);
@@ -66,7 +59,6 @@ export default function LoginPage() {
     e.preventDefault();
     
     if (isAuthenticated || hasRedirected || isLoading) {
-      console.log('⚠️ Login already in progress or user authenticated');
       return;
     }
 
@@ -75,15 +67,12 @@ export default function LoginPage() {
     setNotVerified(false);
 
     try {
-      console.log('🔑 Attempting login with:', formData.email);
       
       loginSchema.parse(formData);
       await login(formData.email, formData.password, formData.rememberMe);
       
-      console.log('✅ Login successful, authentication state will trigger redirect');
       
     } catch (err: any) {
-      console.error('❌ Login failed:', err);
 
       if (err instanceof z.ZodError) {
         setError(err.errors[0].message);

@@ -9,19 +9,23 @@ export interface User {
   name: string;
   role: string;
   isAdmin: boolean;
-  
-  wordCredits: number;
+
+  // Word credit balances (all three buckets)
+  wordCredits: number;          // legacy bucket
+  subscriptionWordBalance: number;
+  topupWordBalance: number;
+  totalWordCredits: number;     // computed sum of all three buckets
   totalWordsUsed: number;
   currentMonthUsage: number;
-  
+
   usageCredits: number;
   credits: number;
   creditUsage?: number;
-  
+
   remainingCredits?: number;
   usedCredits?: number;
   subscriptionPlan?: string;
-  
+
   plan: string;
   status: string;
   emailVerified: boolean;
@@ -105,27 +109,27 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     if (!url) return '';
     if (url.includes('/api/image-proxy')) return url;
     if (url.startsWith('blob:')) return url;
-    
+
     if (url.includes('localhost:5000') || url.startsWith('http://') || url.startsWith('https://')) {
       try {
         const urlObj = new URL(url);
         const path = urlObj.pathname;
         return `/api/image-proxy?path=${encodeURIComponent(path)}`;
-      } catch (e) {
-        // Ignore parsing errors
+      } catch {
+        // ignore
       }
     }
-    
+
     if (url.startsWith('/uploads/') || url.startsWith('uploads/')) {
       const cleanPath = url.startsWith('/') ? url : `/${url}`;
       return `/api/image-proxy?path=${encodeURIComponent(cleanPath)}`;
     }
-    
+
     if (url && !url.startsWith('http') && !url.startsWith('/api/')) {
       const cleanPath = url.startsWith('/') ? url : `/${url}`;
       return `/api/image-proxy?path=${encodeURIComponent(cleanPath)}`;
     }
-    
+
     return url;
   }, []);
 
@@ -138,7 +142,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const formatUserData = useCallback((userData: any): User => {
     const isUserAdmin = userData.role === 'admin' || userData.role === 'super_admin';
     const processedAvatar = processAvatarUrl(userData.avatar || '');
-    
+
     let userPlan = 'free';
     if (userData.subscription?.plan) {
       userPlan = userData.subscription.plan;
@@ -147,26 +151,34 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     } else if (userData.plan) {
       userPlan = userData.plan;
     }
-    
+
+    const wordCredits = userData.wordCredits || 0;
+    const subscriptionWordBalance = userData.subscriptionWordBalance || 0;
+    const topupWordBalance = userData.topupWordBalance || 0;
+    const totalWordCredits = wordCredits + subscriptionWordBalance + topupWordBalance;
+
     return {
       id: userData.id || userData._id,
       email: userData.email,
       name: userData.name,
       role: userData.role || 'user',
       isAdmin: isUserAdmin,
-      
-      wordCredits: userData.wordCredits || 0,
+
+      wordCredits,
+      subscriptionWordBalance,
+      topupWordBalance,
+      totalWordCredits,
       totalWordsUsed: userData.totalWordsUsed || 0,
       currentMonthUsage: userData.currentMonthUsage || 0,
-      
-      usageCredits: userData.credits || userData.usageCredits || userData.wordCredits || 0,
-      credits: userData.credits || userData.wordCredits || 0,
+
+      usageCredits: userData.credits || userData.usageCredits || totalWordCredits,
+      credits: userData.credits || wordCredits,
       creditUsage: userData.creditUsage || userData.currentMonthUsage || 0,
-      
-      remainingCredits: userData.credits || userData.usageCredits || userData.wordCredits || 0,
+
+      remainingCredits: totalWordCredits,
       usedCredits: userData.creditUsage || userData.currentMonthUsage || userData.usedCredits || 0,
       subscriptionPlan: userPlan,
-      
+
       plan: userPlan,
       status: userData.status || 'active',
       emailVerified: userData.emailVerified || false,
@@ -184,7 +196,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         theme: userData.preferences?.theme as 'system' | 'light' | 'dark' || 'system',
       },
       security: userData.security,
-      subscription: userData.subscription
+      subscription: userData.subscription,
     };
   }, [processAvatarUrl]);
 
@@ -224,20 +236,20 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     const initializeAuth = async () => {
       if (initialized) return;
-      
+
       const savedUser = localStorage.getItem('user');
       const savedToken = localStorage.getItem('token');
-      
+
       if (savedUser && savedToken && isMounted) {
         try {
           const userData = JSON.parse(savedUser);
           const formattedUser = formatUserData(userData);
           setUser(formattedUser);
-        } catch (e) {
+        } catch {
           localStorage.removeItem('user');
         }
       }
-      
+
       if (isMounted) {
         await fetchUser();
         setLoading(false);
@@ -252,10 +264,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     };
   }, [fetchUser, initialized, formatUserData]);
 
-  const login = useCallback(async (email: string, password: string, rememberMe?: boolean) => {
+  const login = useCallback(async (email: string, password: string, _rememberMe?: boolean) => {
     try {
-      console.log('🔑 Attempting login to:', process.env.NEXT_PUBLIC_API_URL);
-
       const response = await authAPI.login({ email, password });
 
       if (response.data.success) {
@@ -266,30 +276,23 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           localStorage.setItem('token', token);
           localStorage.setItem('user', JSON.stringify(formattedUser));
         } catch (storageError) {
-          console.error('❌ Failed to store auth data in localStorage:', storageError);
           throw new Error('Failed to save login session. Please check your browser settings.');
         }
 
         setUser(formattedUser);
-        console.log('✅ Login successful');
       } else {
         throw new Error(response.data.message || 'Login failed');
       }
     } catch (error: any) {
-      console.error('❌ Login error:', error);
-
       if (error.code === 'NETWORK_ERROR' || error.message?.includes('Network Error')) {
         throw new Error('Unable to connect to server. Please check your internet connection.');
       }
-
       if (error.response?.status === 429) {
         throw new Error('Too many login attempts. Please try again later.');
       }
-
       if (error.response?.status === 500) {
         throw new Error('Server error. Please try again later.');
       }
-
       throw new Error(error.response?.data?.message || error.message || 'Login failed. Please check your credentials.');
     }
   }, [formatUserData]);
@@ -300,7 +303,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         email,
         password,
         name,
-        confirmPassword: password
+        confirmPassword: password,
       });
 
       if (response.data.success) {
@@ -319,7 +322,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     setUser(null);
-    
+
     if (typeof window !== 'undefined') {
       window.location.href = '/login';
     }
@@ -333,14 +336,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       if (optimisticUpdate.avatar) {
         optimisticUpdate.avatar = processAvatarUrl(optimisticUpdate.avatar);
       }
-      
+
       setUser(optimisticUpdate);
       localStorage.setItem('user', JSON.stringify(optimisticUpdate));
-      
+
       if (Object.keys(userData).length === 1 && userData.avatar) {
         return formatUserData(optimisticUpdate);
       }
-      
+
       const response = await authAPI.updateProfile(userData);
 
       if (response.data.success) {
@@ -368,38 +371,48 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const deductWordCredits = useCallback(async (wordCount: number): Promise<boolean> => {
     if (!user) return false;
-    
+
+    // FIX: Check against totalWordCredits (all three buckets), not just wordCredits (legacy bucket).
+    // Previously checked user.wordCredits < wordCount which ignored subscription and topup balances.
+    const totalAvailable = user.totalWordCredits;
+    if (totalAvailable < wordCount) {
+      return false;
+    }
+
     try {
-      if (user.wordCredits < wordCount) {
-        return false;
-      }
-      
-      const response = await authAPI.post('/auth/deduct-credits', { amount: wordCount });
-      
+      // FIX: Backend expects { wordCount } not { amount }. Previous code sent { amount: wordCount }
+      // which caused the backend to always return 400 "Valid word count is required".
+      const response = await authAPI.post('/auth/deduct-credits', { wordCount });
+
       if (response.data.success) {
         const updatedUser = {
           ...user,
-          wordCredits: response.data.wordCredits,
-          totalWordsUsed: response.data.totalWordsUsed,
-          currentMonthUsage: response.data.currentMonthUsage,
-          remainingCredits: response.data.wordCredits,
-          usedCredits: response.data.totalWordsUsed
+          wordCredits: response.data.wordCredits ?? user.wordCredits,
+          subscriptionWordBalance: response.data.subscriptionWordBalance ?? user.subscriptionWordBalance,
+          topupWordBalance: response.data.topupWordBalance ?? user.topupWordBalance,
+          totalWordCredits:
+            (response.data.wordCredits ?? user.wordCredits) +
+            (response.data.subscriptionWordBalance ?? user.subscriptionWordBalance) +
+            (response.data.topupWordBalance ?? user.topupWordBalance),
+          totalWordsUsed: response.data.totalWordsUsed ?? user.totalWordsUsed,
+          currentMonthUsage: response.data.currentMonthUsage ?? user.currentMonthUsage,
         };
-        
+
         setUser(updatedUser);
         localStorage.setItem('user', JSON.stringify(updatedUser));
         return true;
       }
-      
+
       return false;
-    } catch (error: any) {
+    } catch {
       return false;
     }
   }, [user]);
 
   const hasWordCredits = useCallback((wordCount: number): boolean => {
     if (!user) return false;
-    return user.wordCredits >= wordCount;
+    // Check against total across all buckets
+    return user.totalWordCredits >= wordCount;
   }, [user]);
 
   const getWordCreditStatus = useCallback(() => {
@@ -408,24 +421,26 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         available: 0,
         used: 0,
         percentage: 0,
-        canAfford: () => false
+        canAfford: () => false,
       };
     }
 
-    const total = user.wordCredits + user.totalWordsUsed;
-    const usedPercentage = total > 0 ? (user.totalWordsUsed / total) * 100 : 0;
+    const available = user.totalWordCredits;
+    const used = user.totalWordsUsed;
+    const total = available + used;
+    const usedPercentage = total > 0 ? (used / total) * 100 : 0;
 
     return {
-      available: user.wordCredits,
-      used: user.totalWordsUsed,
+      available,
+      used,
       percentage: usedPercentage,
-      canAfford: (words: number) => user.wordCredits >= words
+      canAfford: (words: number) => available >= words,
     };
   }, [user]);
 
   const resetPassword = useCallback(async (email: string) => {
     try {
-      await authAPI.post('/auth/reset-password', { email });
+      await authAPI.forgotPassword(email);
     } catch (error: any) {
       throw new Error(error.response?.data?.message || 'Password reset failed');
     }
@@ -458,7 +473,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     deductWordCredits,
     hasWordCredits,
     getWordCreditStatus,
-    resetPassword
+    resetPassword,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

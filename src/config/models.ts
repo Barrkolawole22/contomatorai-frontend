@@ -1,20 +1,20 @@
 export const MODEL_CONFIG = {
-  groq: {
-    displayName: 'Fast Generation',
-    description: 'Quick and efficient',
-    creditMultiplier: 1,
-    icon: '⚡'
-  },
   gemini: {
-    displayName: 'Balanced',
-    description: 'Good quality and speed',
-    creditMultiplier: 2,
-    icon: '⭐'
+    displayName: 'Fast Generation',
+    description: 'Gemini 2.5 Flash — quick, efficient generation',
+    creditMultiplier: 1,
+    icon: '⚡',
+    speed: 'fastest',
+    quality: 'good',
   },
-  claude: {
-    displayName: 'Premium Quality',
-    description: 'Best for complex content',
-    creditMultiplier: 5,
-    icon: '💎'
-  }
-};
+  'gemini-pro': {
+    displayName: 'Balanced',
+    description: 'Gemini 2.5 Pro + Google Search Grounding — well-researched content',
+    creditMultiplier: 2,
+    icon: '🌐',
+    speed: 'fast',
+    quality: 'better',
+  },
+} as const;
+
+export type AIModel = keyof typeof MODEL_CONFIG;

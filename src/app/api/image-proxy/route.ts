@@ -1,82 +1,122 @@
 export const dynamic = 'force-dynamic';
-// frontend/src/app/api/image-proxy/route.ts
+// src/app/api/image-proxy/route.ts
+
 import { NextRequest, NextResponse } from 'next/server';
 
-// Remove /api suffix since uploads are served at root level
-const BACKEND_BASE_URL = process.env.NEXT_PUBLIC_API_URL?.replace('/api', '') || 'http://localhost:5000';
+const BACKEND_BASE_URL =
+  (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api').replace(/\/api$/, '');
+
+// Only these path prefixes are allowed through the proxy
+const ALLOWED_PATH_PREFIXES = ['uploads/'];
+
+// Only these content types will be forwarded
+const ALLOWED_CONTENT_TYPES = [
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+  'image/svg+xml',
+  'image/avif',
+];
+
+// Matches any path traversal attempt: .., %2e, %2f, null bytes, etc.
+const DANGEROUS_PATTERN = /(\.\.|%2e%2e|%00|%0a|%0d)/i;
 
 export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url);
-    const path = searchParams.get('path');
-
-    console.log('🖼️ Image proxy request for path:', path);
-
-    if (!path) {
-      console.error('❌ No path provided to image proxy');
+    // ── 1. Require authentication ────────────────────────────────────────────
+    const authorization = request.headers.get('authorization');
+    if (!authorization || !authorization.startsWith('Bearer ')) {
       return NextResponse.json(
-        { success: false, message: 'Path parameter is required' },
+        { success: false, message: 'Unauthorized' },
+        { status: 401 }
+      );
+    }
+
+    // ── 2. Validate the path parameter ───────────────────────────────────────
+    const { searchParams } = new URL(request.url);
+    const rawPath = searchParams.get('path');
+
+    if (!rawPath) {
+      return NextResponse.json(
+        { success: false, message: 'path parameter is required' },
         { status: 400 }
       );
     }
 
-    // Clean and validate the path
-    let cleanPath = path;
-    
-    // Remove any leading slashes and ensure it starts with uploads/
-    if (cleanPath.startsWith('/')) {
-      cleanPath = cleanPath.substring(1);
-    }
-    
-    if (!cleanPath.startsWith('uploads/')) {
-      cleanPath = `uploads/${cleanPath}`;
-    }
+    // Strip leading slash
+    let cleanPath = rawPath.startsWith('/') ? rawPath.slice(1) : rawPath;
 
-    // Construct the full URL to the backend (without /api prefix)
-    const imageUrl = `${BACKEND_BASE_URL}/${cleanPath}`;
-    console.log('🔗 Fetching image from:', imageUrl);
-
-    // Fetch the image from the backend
-    const response = await fetch(imageUrl, {
-      method: 'GET',
-      headers: {
-        'Cache-Control': 'public, max-age=31536000',
-      },
-    });
-
-    if (!response.ok) {
-      console.error('❌ Failed to fetch image:', response.status, response.statusText);
-      
+    // Reject path traversal attempts before any further processing
+    if (DANGEROUS_PATTERN.test(cleanPath)) {
       return NextResponse.json(
-        { success: false, message: 'Image not found' },
-        { status: 404 }
+        { success: false, message: 'Invalid path' },
+        { status: 400 }
       );
     }
 
-    // Get the image data
-    const imageBuffer = await response.arrayBuffer();
-    const contentType = response.headers.get('content-type') || 'image/jpeg';
+    // Ensure path starts with an allowed prefix
+    const isAllowed = ALLOWED_PATH_PREFIXES.some((prefix) =>
+      cleanPath.startsWith(prefix)
+    );
+    if (!isAllowed) {
+      cleanPath = `uploads/${cleanPath}`;
+    }
 
-    console.log('✅ Image fetched successfully:', {
-      size: imageBuffer.byteLength,
-      contentType,
-      path: cleanPath
+    // Re-check after potential prefix addition
+    if (DANGEROUS_PATTERN.test(cleanPath)) {
+      return NextResponse.json(
+        { success: false, message: 'Invalid path' },
+        { status: 400 }
+      );
+    }
+
+    // ── 3. Fetch from backend ─────────────────────────────────────────────────
+    const imageUrl = `${BACKEND_BASE_URL}/${cleanPath}`;
+
+    const response = await fetch(imageUrl, {
+      method: 'GET',
+      signal: AbortSignal.timeout(10_000),
     });
 
-    // Return the image with proper headers
+    if (!response.ok) {
+      return NextResponse.json(
+        { success: false, message: 'Image not found' },
+        { status: response.status === 404 ? 404 : 502 }
+      );
+    }
+
+    // ── 4. Validate content type before forwarding ────────────────────────────
+    const contentType = response.headers.get('content-type') || '';
+    const baseType = contentType.split(';')[0].trim().toLowerCase();
+
+    if (!ALLOWED_CONTENT_TYPES.includes(baseType)) {
+      return NextResponse.json(
+        { success: false, message: 'Unsupported media type' },
+        { status: 415 }
+      );
+    }
+
+    const imageBuffer = await response.arrayBuffer();
+
     return new NextResponse(imageBuffer, {
       status: 200,
       headers: {
-        'Content-Type': contentType,
-        'Cache-Control': 'public, max-age=31536000, immutable',
-        'Cross-Origin-Resource-Policy': 'cross-origin',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET',
-        'Access-Control-Allow-Headers': 'Content-Type',
+        'Content-Type': baseType,
+        'Cache-Control': 'private, max-age=3600',
+        // Removed wildcard CORS — images are only served to authenticated users
+        'X-Content-Type-Options': 'nosniff',
       },
     });
-  } catch (error) {
-    console.error('❌ Image proxy error:', error);
+  } catch (error: any) {
+    if (error?.name === 'TimeoutError') {
+      return NextResponse.json(
+        { success: false, message: 'Image fetch timed out' },
+        { status: 504 }
+      );
+    }
+    console.error('Image proxy error:', error);
     return NextResponse.json(
       { success: false, message: 'Failed to proxy image' },
       { status: 500 }

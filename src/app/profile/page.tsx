@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthProvider';
+import { authAPI } from '@/lib/api';
 import { 
   User,
   Mail,
@@ -104,20 +105,15 @@ const ProfilePage = () => {
   const processAvatarUrl = useCallback((url: string): string => {
     if (!url) return '';
     
-    console.log('Processing avatar URL:', url);
-    
     // If it's already a proxied URL, return as-is
     if (url.includes('/api/image-proxy')) {
-      console.log('Already proxied URL, returning as-is');
       return url;
     }
     
     // Fix: Handle old proxy-image URLs (convert to correct endpoint)
     if (url.includes('/api/proxy-image/')) {
-      console.log('Converting old proxy-image URL to image-proxy');
       const path = url.replace(/^.*\/api\/proxy-image/, '');
       const newUrl = `/api/image-proxy?path=${encodeURIComponent(path)}`;
-      console.log('Converted to:', newUrl);
       return newUrl;
     }
     
@@ -125,18 +121,14 @@ const ProfilePage = () => {
     if (url.includes('localhost:5000')) {
       const path = url.replace(/^.*localhost:5000/, '');
       const newUrl = `/api/image-proxy?path=${encodeURIComponent(path)}`;
-      console.log('Proxied localhost URL to:', newUrl);
       return newUrl;
     }
     
     // If it starts with /uploads/, proxy it
     if (url.startsWith('/uploads/')) {
       const newUrl = `/api/image-proxy?path=${encodeURIComponent(url)}`;
-      console.log('Proxied relative URL to:', newUrl);
       return newUrl;
     }
-    
-    console.log('URL needs no processing, returning as-is');
     return url;
   }, []);
 
@@ -234,17 +226,6 @@ const ProfilePage = () => {
     document.documentElement.classList.toggle('dark', shouldUseDark);
   }, [profile.preferences.theme]);
 
-  // Debug avatar URL
-  useEffect(() => {
-    console.log('=== AVATAR DEBUG ===');
-    console.log('User object:', user);
-    console.log('Profile avatar:', profile.avatar);
-    console.log('User avatar:', user?.avatar);
-    console.log('Image error state:', imageError);
-    console.log('Saving state:', saving);
-    console.log('===================');
-  }, [user, profile.avatar, imageError, saving]);
-
   // Check authentication
   useEffect(() => {
     if (!user && !loading) {
@@ -274,21 +255,8 @@ const ProfilePage = () => {
         })
       };
 
-      const response = await fetch('/api/profile', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify(updateData)
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to update profile');
-      }
-
-      const updatedUser = await response.json();
-      await updateUser(updatedUser.data);
+      const response = await authAPI.put('/auth/profile', updateData);
+      await updateUser(response.data.data);
       setSuccess('Profile updated successfully!');
       
       // Apply theme changes immediately
@@ -309,7 +277,6 @@ const ProfilePage = () => {
 
       setTimeout(() => setSuccess(null), 3000);
     } catch (err: any) {
-      console.error('Profile update error:', err);
       setError(err.message || 'Failed to update profile');
       setTimeout(() => setError(null), 5000);
     } finally {
@@ -333,28 +300,16 @@ const ProfilePage = () => {
       setError(null);
       setSuccess(null);
 
-      const response = await fetch('/api/auth/change-password', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({
-          currentPassword: passwordData.currentPassword,
-          newPassword: passwordData.newPassword
-        })
+      await authAPI.put('/auth/change-password', {
+        currentPassword: passwordData.currentPassword,
+        newPassword: passwordData.newPassword
       });
-
-      if (!response.ok) {
-        throw new Error('Failed to change password');
-      }
 
       setSuccess('Password changed successfully!');
       setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
       setShowPasswordForm(false);
       setTimeout(() => setSuccess(null), 3000);
     } catch (err: any) {
-      console.error('Password change error:', err);
       setError(err.message || 'Failed to change password');
       setTimeout(() => setError(null), 5000);
     } finally {
@@ -364,8 +319,6 @@ const ProfilePage = () => {
 
   // FIXED: Avatar upload handler with proper error handling
   const handleAvatarUpload = async (file: File) => {
-    console.log('=== STARTING AVATAR UPLOAD ===');
-    console.log('File:', file);
 
     // Declare previousAvatar with let to use in catch block
     let previousAvatar = profile.avatar || '';
@@ -376,8 +329,6 @@ const ProfilePage = () => {
 
       // Create a local URL for immediate preview
       const localUrl = URL.createObjectURL(file);
-      console.log('Local preview URL:', localUrl);
-      console.log('Previous avatar:', previousAvatar);
 
       setProfile(prev => ({ ...prev, avatar: localUrl }));
       setImageError(false);
@@ -386,14 +337,11 @@ const ProfilePage = () => {
       formData.append('avatar', file);
 
       // Use absolute path to ensure correct routing
-      console.log('Sending request to /api/profile/avatar...');
       
       // FIXED: Use window.location.origin to ensure we're using the correct origin
       // and avoid any path duplication issues
       const baseUrl = window.location.origin;
       const url = `${baseUrl}/api/profile/avatar`;
-      
-      console.log('Full request URL:', url);
       
       const response = await fetch(url, {
         method: 'POST',
@@ -403,33 +351,25 @@ const ProfilePage = () => {
         body: formData
       });
 
-      console.log('Response status:', response.status);
-
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        console.error('Upload failed:', errorData);
         throw new Error(errorData.message || `Failed to upload avatar: ${response.status} ${response.statusText}`);
       }
 
       const result = await response.json();
-      console.log('=== UPLOAD RESPONSE ===');
-      console.log('Full response:', result);
       
       // Clean up the local URL
       URL.revokeObjectURL(localUrl);
       
       // Get the new avatar URL from server response
       const newAvatarUrl = result.data?.avatar || result.avatar || result.url;
-      console.log('Extracted avatar URL:', newAvatarUrl);
       
       if (!newAvatarUrl) {
-        console.error('No avatar URL found in response!');
         throw new Error('Server did not return avatar URL');
       }
       
       // Process the URL correctly using the right proxy endpoint
       const processedUrl = processAvatarUrl(newAvatarUrl);
-      console.log('Processed avatar URL:', processedUrl);
       
       // Update profile with the processed URL
       setProfile(prev => ({ ...prev, avatar: processedUrl }));
@@ -437,25 +377,18 @@ const ProfilePage = () => {
       
       // Update user context properly
       if (setUser && user) {
-        console.log('Updating user context with avatar:', newAvatarUrl);
         try {
           // Update just the local user context with the original avatar URL
           const updatedUser = { ...user, avatar: newAvatarUrl };
           setUser(updatedUser); // Direct context update
           localStorage.setItem('user', JSON.stringify(updatedUser)); // Persist to localStorage
-          console.log('User context updated successfully');
         } catch (err) {
-          console.error('Failed to update user context:', err);
         }
       }
       
       setSuccess('Avatar updated successfully!');
       setTimeout(() => setSuccess(null), 3000);
-      
-      console.log('=== UPLOAD COMPLETE ===');
     } catch (err: any) {
-      console.error('=== UPLOAD ERROR ===');
-      console.error('Error details:', err);
       setError(err.message || 'Failed to upload avatar');
 
       // FIXED: Revert to previous avatar with proper null handling
@@ -467,7 +400,6 @@ const ProfilePage = () => {
       setTimeout(() => setError(null), 5000);
     } finally {
       setSaving(false);
-      console.log('=== UPLOAD FINISHED ===');
     }
   };
 
@@ -594,12 +526,9 @@ const ProfilePage = () => {
                         alt={profile.name}
                         className="w-full h-full object-cover"
                         onError={(e) => {
-                          console.error('Image failed to load:', profile.avatar);
-                          console.error('Current profile state:', profile);
                           setImageError(true);
                         }}
                         onLoad={() => {
-                          console.log('Image loaded successfully:', profile.avatar);
                           setImageError(false);
                         }}
                       />
@@ -617,7 +546,6 @@ const ProfilePage = () => {
                         onChange={(e) => {
                           const file = e.target.files?.[0];
                           if (file) {
-                            console.log('Starting new upload, resetting image error state');
                             setImageError(false);
                             handleAvatarUpload(file);
                           }
@@ -1297,7 +1225,7 @@ const ProfilePage = () => {
                                 Download a copy of all your account data
                               </p>
                             </div>
-                            <button className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg font-medium transition-all duration-200 flex items-center space-x-2">
+                            <button onClick={() => router.push('/settings?tab=data')} className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg font-medium transition-all duration-200 flex items-center space-x-2">
                               <Download className="w-4 h-4" />
                               <span>Export</span>
                             </button>
@@ -1314,7 +1242,7 @@ const ProfilePage = () => {
                                 Permanently delete your account and all associated data
                               </p>
                             </div>
-                            <button className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-medium transition-all duration-200 flex items-center space-x-2">
+                            <button onClick={() => router.push('/settings?tab=data')} className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-medium transition-all duration-200 flex items-center space-x-2">
                               <Trash2 className="w-4 h-4" />
                               <span>Delete</span>
                             </button>

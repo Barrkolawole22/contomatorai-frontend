@@ -1,4 +1,4 @@
-// frontend/src/lib/adminAPI.ts
+// src/lib/adminAPI.ts
 import axios from 'axios';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
@@ -7,7 +7,7 @@ const adminApiClient = axios.create({ baseURL: API_BASE_URL, timeout: 30000 });
 
 adminApiClient.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('token');
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
     if (token) config.headers.Authorization = `Bearer ${token}`;
     return config;
   },
@@ -17,7 +17,7 @@ adminApiClient.interceptors.request.use(
 adminApiClient.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    if (error.response?.status === 401 && typeof window !== 'undefined') {
       localStorage.removeItem('token');
       window.location.href = '/login';
     }
@@ -45,25 +45,20 @@ export const userAPI = {
     const queryString = new URLSearchParams(params).toString();
     return adminApiClient.get(`/admin/users?${queryString}`);
   },
-  getUserDetails: (userId: string) => {
-    console.log('🔍 API: Calling getUserDetails for ID:', userId);
-    return adminApiClient.get(`/admin/users/${userId}`);
-  },
-  getUserById: (userId: string) => {
-    console.log('🔍 API: Calling getUserById for ID:', userId);
-    return adminApiClient.get(`/admin/users/${userId}`);
-  },
-  createUser: (data: any) => adminApiClient.post('/admin/users', data),
-  updateUser: (userId: string, data: any) => {
-    console.log('🔄 API: Updating user:', userId, data);
-    return adminApiClient.put(`/admin/users/${userId}`, data);
-  },
-  deleteUser: (userId: string) => {
-    console.log('🗑️ API: Deleting user:', userId);
-    return adminApiClient.delete(`/admin/users/${userId}`);
-  },
-  bulkUserAction: (data: any) => adminApiClient.post('/admin/users/bulk-action', data),
-  getUserStats: () => adminApiClient.get('/admin/users/stats'),
+  getUserDetails: (userId: string) =>
+    adminApiClient.get(`/admin/users/${userId}`),
+  getUserById: (userId: string) =>
+    adminApiClient.get(`/admin/users/${userId}`),
+  createUser: (data: any) =>
+    adminApiClient.post('/admin/users', data),
+  updateUser: (userId: string, data: any) =>
+    adminApiClient.put(`/admin/users/${userId}`, data),
+  deleteUser: (userId: string) =>
+    adminApiClient.delete(`/admin/users/${userId}`),
+  bulkUserAction: (data: any) =>
+    adminApiClient.post('/admin/users/bulk-action', data),
+  getUserStats: () =>
+    adminApiClient.get('/admin/users/stats'),
   getUserAnalytics: (timeframe = '30d') =>
     adminApiClient.get(`/admin/users/analytics?timeframe=${timeframe}`),
 };
@@ -73,7 +68,8 @@ export const contentAPI = {
     const queryString = new URLSearchParams(params).toString();
     return adminApiClient.get(`/admin/content?${queryString}`);
   },
-  getContentQuality: () => adminApiClient.get('/admin/content/quality'),
+  getContentQuality: () =>
+    adminApiClient.get('/admin/content/quality'),
   getContentReview: (params = {}) => {
     const queryString = new URLSearchParams(params).toString();
     return adminApiClient.get(`/admin/content/review?${queryString}`);
@@ -89,12 +85,15 @@ export const contentAPI = {
 };
 
 export const ecommerceAPI = {
-  getEcommerceOverview: () => adminApiClient.get('/admin/ecommerce'),
+  getEcommerceOverview: () =>
+    adminApiClient.get('/admin/ecommerce'),
   getOrders: (params = {}) => {
     const queryString = new URLSearchParams(params).toString();
     return adminApiClient.get(`/admin/ecommerce/orders?${queryString}`);
   },
-  getProducts: () => adminApiClient.get('/admin/ecommerce/products'),
+  getProducts: () =>
+    adminApiClient.get('/admin/ecommerce/products'),
+  // NOTE: no backend route exists for this yet
   processRefund: (orderId: string, data: any) =>
     adminApiClient.post(`/admin/ecommerce/orders/${orderId}/refund`, data),
 };
@@ -108,6 +107,7 @@ export const financialAPI = {
     const queryString = new URLSearchParams(params).toString();
     return adminApiClient.get(`/admin/financial/transactions?${queryString}`);
   },
+  // NOTE: no backend route exists for these yet
   processRefund: (transactionId: string, data: any) =>
     adminApiClient.post(`/admin/financial/transactions/${transactionId}/refund`, data),
   adjustUserCredits: (userId: string, data: any) =>
@@ -115,17 +115,21 @@ export const financialAPI = {
 };
 
 export const systemAPI = {
-  getSystemHealth: () => adminApiClient.get('/admin/system/health'),
+  getSystemHealth: () =>
+    adminApiClient.get('/admin/system/health'),
   getSystemMonitoring: (timeRange = '24h') =>
     adminApiClient.get(`/admin/system/monitoring?timeRange=${timeRange}`),
   getSystemLogs: (params = {}) => {
     const queryString = new URLSearchParams(params).toString();
     return adminApiClient.get(`/admin/system/logs?${queryString}`);
   },
-  getSystemConfig: () => adminApiClient.get('/admin/system/config'),
+  getSystemConfig: () =>
+    adminApiClient.get('/admin/system/config'),
   updateSystemConfig: (config: any) =>
     adminApiClient.put('/admin/system/config', { config }),
-  getPerformanceMetrics: () => adminApiClient.get('/admin/metrics/performance'),
+  // NOTE: no backend route exists for these yet
+  getPerformanceMetrics: () =>
+    adminApiClient.get('/admin/metrics/performance'),
   getActivityLogs: (params = {}) => {
     const queryString = new URLSearchParams(params).toString();
     return adminApiClient.get(`/admin/logs/activity?${queryString}`);
@@ -135,14 +139,19 @@ export const systemAPI = {
 };
 
 export const wordpressAPI = {
-  getWordPressOverview: () => adminApiClient.get('/admin/wordpress'),
-  getAllSites: () => adminApiClient.get('/admin/wordpress/sites'),
-  getSiteById: (siteId: string) => adminApiClient.get(`/admin/wordpress/sites/${siteId}`),
-  addSite: (data: any) => adminApiClient.post('/admin/wordpress/sites', data),
+  getWordPressOverview: () =>
+    adminApiClient.get('/admin/wordpress'),
+  getAllSites: () =>
+    adminApiClient.get('/admin/wordpress/sites'),
+  getSiteById: (siteId: string) =>
+    adminApiClient.get(`/admin/wordpress/sites/${siteId}`),
+  addSite: (data: any) =>
+    adminApiClient.post('/admin/wordpress/sites', data),
   updateSite: (siteId: string, data: any) =>
     adminApiClient.put(`/admin/wordpress/sites/${siteId}`, data),
   deleteSite: (siteId: string) =>
     adminApiClient.delete(`/admin/wordpress/sites/${siteId}`),
+  // NOTE: no backend route exists for this yet
   performHealthCheck: (siteId: string) =>
     adminApiClient.post(`/admin/wordpress/sites/${siteId}/health-check`),
   syncSite: (siteId: string) =>
@@ -164,11 +173,18 @@ export const supportAPI = {
     adminApiClient.put(`/admin/support/tickets/${ticketId}`, data),
   addTicketMessage: (ticketId: string, data: any) =>
     adminApiClient.post(`/admin/support/tickets/${ticketId}/messages`, data),
-  getKnowledgeBase: () => adminApiClient.get('/admin/support/knowledge-base'),
+  // NOTE: no backend route exists for this yet
+  getKnowledgeBase: () =>
+    adminApiClient.get('/admin/support/knowledge-base'),
 };
 
 export const notificationsAPI = {
-  getNotifications: (params?: { limit?: number; skip?: number; unreadOnly?: boolean; userId?: string }) => {
+  getNotifications: (params?: {
+    limit?: number;
+    skip?: number;
+    unreadOnly?: boolean;
+    userId?: string;
+  }) => {
     const searchParams = new URLSearchParams();
     if (params?.limit)      searchParams.append('limit', params.limit.toString());
     if (params?.skip)       searchParams.append('skip', params.skip.toString());
@@ -176,35 +192,51 @@ export const notificationsAPI = {
     if (params?.userId)     searchParams.append('userId', params.userId);
     return adminApiClient.get(`/admin/notifications?${searchParams.toString()}`);
   },
-  getUnreadCount: () => adminApiClient.get('/admin/notifications/unread-count'),
-  markAsRead: (id: string) => adminApiClient.patch(`/admin/notifications/${id}/read`),
-  markAllAsRead: () => adminApiClient.put('/admin/notifications/mark-all-read'),
-  deleteNotification: (id: string) => adminApiClient.delete(`/admin/notifications/${id}`),
-  clearAll: () => adminApiClient.delete('/admin/notifications'),
+  // NOTE: no backend route exists for these yet
+  getUnreadCount: () =>
+    adminApiClient.get('/admin/notifications/unread-count'),
+  // Fixed: backend uses PUT /:notificationId (no /read suffix, not PATCH)
+  markAsRead: (id: string) =>
+    adminApiClient.put(`/admin/notifications/${id}`, { read: true }),
+  // NOTE: no backend route exists for this yet
+  markAllAsRead: () =>
+    adminApiClient.put('/admin/notifications/mark-all-read'),
+  deleteNotification: (id: string) =>
+    adminApiClient.delete(`/admin/notifications/${id}`),
+  clearAll: () =>
+    adminApiClient.delete('/admin/notifications'),
   createNotification: (data: {
-    title: string; message: string;
+    title: string;
+    message: string;
     type?: 'info' | 'success' | 'warning' | 'error';
     recipientType: 'user' | 'admin' | 'all' | 'role_based';
-    recipientId?: string; targetRoles?: string[];
+    recipientId?: string;
+    targetRoles?: string[];
   }) => adminApiClient.post('/admin/notifications', data),
   broadcastNotification: (data: {
-    title: string; message: string;
+    title: string;
+    message: string;
     type?: 'info' | 'success' | 'warning' | 'error';
     priority?: 'low' | 'medium' | 'high' | 'urgent';
   }) => adminApiClient.post('/admin/notifications/broadcast', data),
 };
 
 export const settingsAPI = {
-  getSettings: () => adminApiClient.get('/admin/settings'),
-  updateSettings: (settings: any) => adminApiClient.put('/admin/settings', settings),
-  getFeatureFlags: () => adminApiClient.get('/admin/settings/features'),
-  updateFeatureFlags: (features: any) => adminApiClient.put('/admin/settings/features', features),
+  getSettings: () =>
+    adminApiClient.get('/admin/settings'),
+  updateSettings: (settings: any) =>
+    adminApiClient.put('/admin/settings', settings),
+  getFeatureFlags: () =>
+    adminApiClient.get('/admin/settings/features'),
+  updateFeatureFlags: (features: any) =>
+    adminApiClient.put('/admin/settings/features', features),
 };
 
 export const exportAPI = {
   exportUsers: (format: 'json' | 'csv' = 'json') =>
     adminApiClient.get(`/admin/export/users?format=${format}`),
-  exportContent: () => adminApiClient.get('/admin/export/content'),
+  exportContent: () =>
+    adminApiClient.get('/admin/export/content'),
   generateAnalyticsReport: (data: any) =>
     adminApiClient.post('/admin/reports/analytics', data),
 };
@@ -215,19 +247,23 @@ export const searchAPI = {
 };
 
 export const filesAPI = {
-  getFilesOverview: () => adminApiClient.get('/admin/files'),
+  getFilesOverview: () =>
+    adminApiClient.get('/admin/files'),
   uploadFile: (formData: FormData) =>
     adminApiClient.post('/admin/files/upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }),
-  deleteFile: (fileId: string) => adminApiClient.delete(`/admin/files/${fileId}`),
+  deleteFile: (fileId: string) =>
+    adminApiClient.delete(`/admin/files/${fileId}`),
 };
 
 export const dashboardAPI = {
-  getDashboardData: () => adminApiClient.get('/admin/dashboard'),
+  getDashboardData: () =>
+    adminApiClient.get('/admin/dashboard'),
   getDashboardAnalytics: (timeRange = '30d') =>
     adminApiClient.get(`/admin/dashboard/analytics?timeRange=${timeRange}`),
-  getRealTimeData: () => adminApiClient.get('/admin/dashboard/realtime'),
+  getRealTimeData: () =>
+    adminApiClient.get('/admin/dashboard/realtime'),
 };
 
 export const adminAPI = {

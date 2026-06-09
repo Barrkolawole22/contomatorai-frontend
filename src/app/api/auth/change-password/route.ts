@@ -8,7 +8,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 export async function PUT(request: NextRequest) {
   try {
     const headersList = headers();
-    const authorization = headersList.get('authorization');
+    const authorization = (await headersList).get('authorization');
 
     if (!authorization) {
       return NextResponse.json(
@@ -20,7 +20,6 @@ export async function PUT(request: NextRequest) {
     const body = await request.json();
     const { currentPassword, newPassword } = body;
 
-    // Validation
     if (!currentPassword || !newPassword) {
       return NextResponse.json(
         { success: false, message: 'Current password and new password are required' },
@@ -52,7 +51,7 @@ export async function PUT(request: NextRequest) {
 
     return NextResponse.json(data);
   } catch (error) {
-    console.error('Password change error:', error);
+    if (process.env.NODE_ENV === 'development') console.error('Password change error:', error);
     return NextResponse.json(
       { success: false, message: 'Failed to change password' },
       { status: 500 }

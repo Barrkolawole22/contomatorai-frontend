@@ -122,7 +122,7 @@ const AdminDashboard = () => {
       const financialResponse = await adminAPI.financial.getFinancialOverview(timeRange);
       
       // Fetch WordPress sites count
-      const wpResponse = await authAPI.get('/wordpress');
+      const wpResponse = await adminAPI.wordpress.getWordPressOverview();
       const connectedSites = wpResponse.data.success ? wpResponse.data.data.length : 0;
       
       // Merge data
@@ -161,7 +161,7 @@ const AdminDashboard = () => {
         }
       });
     } catch (err: any) {
-      console.error('Dashboard fetch error:', err);
+      if (process.env.NODE_ENV === 'development') console.error('Dashboard fetch error:', err);
       setError(err.response?.data?.message || 'Failed to load dashboard data');
     } finally {
       setLoading(false);
@@ -186,7 +186,7 @@ const AdminDashboard = () => {
         setRecentContent(contentResponse.data.data.content || []);
       }
     } catch (err: any) {
-      console.error('Recent data fetch error:', err);
+      if (process.env.NODE_ENV === 'development') console.error('Recent data fetch error:', err);
     }
   };
 

@@ -1,6 +1,6 @@
 import React from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/router';
+import { useRouter, usePathname } from 'next/navigation';
 import { LayoutDashboard, FileText, Search, Upload, Settings, ChevronDown } from 'lucide-react';
 
 interface NavItemProps {
@@ -61,10 +61,10 @@ const NavItem: React.FC<NavItemProps> = ({ href, icon, title, active, subItems }
 };
 
 const Sidebar: React.FC = () => {
-  const router = useRouter();
+  const pathname = usePathname();
 
   const isActive = (path: string) => {
-    return router.pathname === path || router.pathname.startsWith(`${path}/`);
+    return pathname === path || pathname.startsWith(`${path}/`);
   };
 
   return (

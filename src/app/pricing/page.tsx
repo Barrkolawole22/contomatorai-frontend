@@ -1,90 +1,12 @@
 export const dynamic = 'force-dynamic';
 import Link from 'next/link';
+import { PLANS, ADD_ONS } from '@/lib/plans';
 import { ArrowRight, Check, Zap, Globe, TrendingUp, Crown, Users, Sparkles } from 'lucide-react';
 
 export default function PricingPage() {
-  const plans = [
-    {
-      name: "Starter",
-      price: 29,
-      period: "month",
-      description: "Perfect for individual bloggers and small content creators",
-      credits: "10,000 AI Credits",
-      features: [
-        "10,000 AI-generated words/month",
-        "2 WordPress sites",
-        "Basic keyword research",
-        "SEO optimization",
-        "Content library",
-        "Email support",
-        "Basic analytics"
-      ],
-      popular: false,
-      color: "blue"
-    },
-    {
-      name: "Professional",
-      price: 79,
-      period: "month",
-      description: "Ideal for growing businesses and content agencies",
-      credits: "50,000 AI Credits",
-      features: [
-        "50,000 AI-generated words/month",
-        "10 WordPress sites",
-        "Advanced keyword research",
-        "Priority content generation",
-        "Content optimization suggestions",
-        "Publishing scheduler",
-        "Advanced analytics",
-        "Priority support",
-        "Custom content templates"
-      ],
-      popular: true,
-      color: "purple"
-    },
-    {
-      name: "Enterprise",
-      price: 199,
-      period: "month", 
-      description: "For large teams and high-volume content production",
-      credits: "Unlimited AI Credits",
-      features: [
-        "Unlimited AI-generated words",
-        "Unlimited WordPress sites",
-        "White-label solution",
-        "Custom AI training",
-        "API access",
-        "Team collaboration tools",
-        "Advanced reporting",
-        "Dedicated account manager",
-        "Custom integrations",
-        "SLA guarantee"
-      ],
-      popular: false,
-      color: "gold"
-    }
-  ];
-
-  const addOns = [
-    {
-      name: "Extra AI Credits",
-      price: 10,
-      unit: "per 10,000 words",
-      description: "Additional AI content generation credits"
-    },
-    {
-      name: "Premium Templates",
-      price: 29,
-      unit: "one-time",
-      description: "Access to 100+ premium content templates"
-    },
-    {
-      name: "Advanced Analytics",
-      price: 19,
-      unit: "per month",
-      description: "Detailed performance metrics and insights"
-    }
-  ];
+  // Plans and add-ons imported from @/lib/plans — single source of truth
+  const plans = PLANS;
+  const addOns = ADD_ONS;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
@@ -218,9 +140,12 @@ export default function PricingPage() {
                     <span className="text-2xl font-bold text-gray-900">${addon.price}</span>
                     <span className="text-gray-600 ml-1">/{addon.unit}</span>
                   </div>
-                  <button className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors">
+                  <Link
+                    href="/dashboard/billing?tab=topups"
+                    className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                  >
                     Add
-                  </button>
+                  </Link>
                 </div>
               </div>
             ))}

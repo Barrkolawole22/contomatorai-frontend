@@ -320,7 +320,7 @@ export default function BillingPage() {
                 <Zap className="w-6 h-6 text-blue-600" />
               </div>
               <div className="text-2xl font-bold text-gray-900 dark:text-white">
-                {fmt(billingInfo?.wordCredits || 0)}
+                {fmt((billingInfo?.subscriptionWordBalance || 0) + (billingInfo?.topupWordBalance || 0) + (billingInfo?.wordCredits || 0))}
               </div>
               <div className="text-sm text-gray-500">Total Available</div>
               {billingInfo?.needsRefill && (

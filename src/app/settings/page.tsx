@@ -142,7 +142,7 @@ const SettingsPage = () => {
           });
         }
       } catch (error: any) {
-        console.error('Failed to load settings:', error);
+        // console.error suppressed in production
         setError('Failed to load settings');
       } finally {
         setLoading(false);
@@ -217,7 +217,7 @@ const SettingsPage = () => {
         throw new Error(response.data.message || 'Save failed');
       }
     } catch (error: any) {
-      console.error('Save error:', error);
+
       setError(error.message || 'Failed to save changes');
       setSaveStatus('error');
       setTimeout(() => setSaveStatus(''), 3000);
@@ -247,31 +247,12 @@ const SettingsPage = () => {
         URL.revokeObjectURL(url);
       }
     } catch (error: any) {
-      console.error('Export error:', error);
+
       setError('Failed to export data');
     }
   };
 
-  const handleRegenerateApiKey = async () => {
-    try {
-      setSaveStatus('saving');
-      const response = await settingsAPI.updateApiSettings({ regenerateApiKey: true });
-      
-      if (response.data.success) {
-        setApiSettings(prev => ({
-          ...prev,
-          apiKey: response.data.data.apiKey
-        }));
-        setSaveStatus('saved');
-        setTimeout(() => setSaveStatus(''), 2000);
-      }
-    } catch (error: any) {
-      console.error('API key regeneration error:', error);
-      setError('Failed to regenerate API key');
-      setSaveStatus('error');
-      setTimeout(() => setSaveStatus(''), 3000);
-    }
-  };
+  // handleRegenerateApiKey: removed — backend route not yet implemented
 
   const handleDeleteAccount = async () => {
     if (!deleteConfirmation.password) {
@@ -294,7 +275,7 @@ const SettingsPage = () => {
         window.location.href = '/login?deleted=true';
       }
     } catch (error: any) {
-      console.error('Delete account error:', error);
+      if (process.env.NODE_ENV === 'development') console.error('Delete account error:', error);
       setError(error.response?.data?.message || 'Failed to delete account');
       setSaveStatus('error');
       setTimeout(() => setSaveStatus(''), 3000);
@@ -709,13 +690,9 @@ const SettingsPage = () => {
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
-              <button 
-                onClick={handleRegenerateApiKey}
-                disabled={saveStatus === 'saving'}
-                className="px-4 py-2 bg-gray-600 hover:bg-gray-700 disabled:bg-gray-400 text-white text-sm font-medium rounded-lg transition-colors"
-              >
-                {saveStatus === 'saving' ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Regenerate'}
-              </button>
+              <span className="inline-flex items-center px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 text-xs font-medium rounded-lg border border-gray-200 dark:border-gray-600 cursor-not-allowed">
+                Coming Soon
+              </span>
             </div>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
               Keep your API key secure. Don't share it publicly.
@@ -798,7 +775,7 @@ const SettingsPage = () => {
               <h4 className="text-sm font-medium text-gray-900 dark:text-white">Export All Data</h4>
               <p className="text-sm text-gray-500 dark:text-gray-400">Download all your profile data and settings</p>
             </div>
-            <button 
+            <button
               onClick={() => handleExport('json')}
               className="inline-flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg transition-colors"
             >
@@ -812,7 +789,7 @@ const SettingsPage = () => {
               <h4 className="text-sm font-medium text-gray-900 dark:text-white">Export Profile Data</h4>
               <p className="text-sm text-gray-500 dark:text-gray-400">Download your profile information in CSV format</p>
             </div>
-            <button 
+            <button
               onClick={() => handleExport('csv')}
               className="inline-flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg transition-colors"
             >
