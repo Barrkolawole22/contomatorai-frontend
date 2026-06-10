@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { settingsAPI } from '@/lib/api';
@@ -602,4 +602,16 @@ const SettingsPage = () => {
   );
 };
 
-export default SettingsPage;
+function SettingsPageWrapper() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="w-8 h-8 animate-spin rounded-full border-4 border-blue-600 border-t-transparent" />
+      </div>
+    }>
+      <SettingsPage />
+    </Suspense>
+  );
+}
+
+export default SettingsPageWrapper;

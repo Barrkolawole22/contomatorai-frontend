@@ -12,7 +12,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/a
 export async function GET(request: NextRequest) {
   try {
     const headersList = headers();
-    const authorization = headersList.get('authorization');
+    const authorization = (await headersList).get('authorization');
 
     if (!authorization) {
       return NextResponse.json(

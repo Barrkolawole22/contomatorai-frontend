@@ -1,12 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Mail, CheckCircle, AlertCircle, RefreshCw } from 'lucide-react';
 import { authAPI } from '@/lib/api';
 
-export default function VerifyEmailPage() {
+function VerifyEmailContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const email = searchParams?.get('email') || '';
@@ -43,12 +43,8 @@ export default function VerifyEmailPage() {
           </div>
         </div>
         <h2 className="text-3xl font-bold text-gray-900 mb-2">Check your email</h2>
-        <p className="text-gray-600">
-          We sent a verification link to
-        </p>
-        {email && (
-          <p className="font-medium text-gray-900 mt-1">{email}</p>
-        )}
+        <p className="text-gray-600">We sent a verification link to</p>
+        {email && <p className="font-medium text-gray-900 mt-1">{email}</p>}
       </div>
 
       {error && (
@@ -81,15 +77,9 @@ export default function VerifyEmailPage() {
           className="w-full flex justify-center items-center py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {isResending ? (
-            <>
-              <RefreshCw className="animate-spin h-4 w-4 mr-2" />
-              Resending...
-            </>
+            <><RefreshCw className="animate-spin h-4 w-4 mr-2" />Resending...</>
           ) : (
-            <>
-              <RefreshCw className="h-4 w-4 mr-2" />
-              Resend verification email
-            </>
+            <><RefreshCw className="h-4 w-4 mr-2" />Resend verification email</>
           )}
         </button>
 
@@ -108,5 +98,17 @@ export default function VerifyEmailPage() {
         </Link>
       </p>
     </div>
+  );
+}
+
+export default function VerifyEmailPage() {
+  return (
+    <Suspense fallback={
+      <div className="w-full max-w-md mx-auto text-center py-12">
+        <RefreshCw className="animate-spin h-8 w-8 text-blue-600 mx-auto" />
+      </div>
+    }>
+      <VerifyEmailContent />
+    </Suspense>
   );
 }

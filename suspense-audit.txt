@@ -1,0 +1,4146 @@
+
+
+========================================
+FILE: src\app\(admin)\admin\settings\page.tsx
+========================================
+
+'use client';
+import { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
+import DashboardLayout from '@/components/layout/DashboardLayout';
+import { settingsAPI } from '@/lib/api';
+import { useAuth } from '@/context/AuthProvider';
+import {
+  Bell, Eye, EyeOff, Save, AlertTriangle, Check,
+  Settings as SettingsIcon, Key, Smartphone, User,
+  Lock, Shield, Download, Trash2, Loader2
+} from 'lucide-react';
+
+const SettingsPage = () => {
+  const searchParams = useSearchParams();
+  const tabParam = searchParams.get('tab');
+  const [activeTab, setActiveTab] = useState(tabParam || 'profile');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  // FIX: one status record per section instead of one shared string
+  const [saveStatuses, setSaveStatuses] = useState<Record<string, 'idle' | 'saving' | 'saved' | 'error'>>({});
+  const getSaveStatus = (section: string) => saveStatuses[section] || 'idle';
+  const setSectionStatus = (section: string, status: 'idle' | 'saving' | 'saved' | 'error') =>
+    setSaveStatuses(prev => ({ ...prev, [section]: status }));
+
+  const { user, refreshUser } = useAuth();
+
+  const [profileData, setProfileData] = useState({ name: '', email: '', bio: '', website: '', company: '', location: '' });
+  const [passwordData, setPasswordData] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
+  const [notificationSettings, setNotificationSettings] = useState({
+    emailNotifications: true, pushNotifications: false, weeklyReports: true,
+    creditAlerts: true, articleUpdates: false, marketingEmails: false,
+  });
+  const [preferences, setPreferences] = useState({
+    theme: 'system', language: 'en', timezone: 'America/Los_Angeles',
+    defaultContentType: 'blog', autoSave: true, wordCountDisplay: true,
+  });
+  const [apiSettings, setApiSettings] = useState({ apiKey: '', rateLimit: 100, webhookUrl: '', enableWebhooks: false });
+  const [privacySettings, setPrivacySettings] = useState({ analyticsTracking: true, dataSharing: false, cookiePreferences: true });
+  const [deleteConfirmation, setDeleteConfirmation] = useState({ showModal: false, password: '' });
+
+  useEffect(() => { if (tabParam) setActiveTab(tabParam); }, [tabParam]);
+
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        setLoading(true);
+        const response = await settingsAPI.getSettings();
+        if (response.data.success) {
+          const s = response.data.data;
+          setProfileData({ name: s.profile.name || '', email: s.profile.email || '', bio: s.profile.bio || '', website: s.profile.website || '', company: s.profile.company || '', location: s.profile.location || '' });
+          setNotificationSettings({ emailNotifications: s.notifications.emailNotifications ?? true, pushNotifications: s.notifications.pushNotifications ?? false, weeklyReports: s.notifications.weeklyReports ?? true, creditAlerts: s.notifications.creditAlerts ?? true, articleUpdates: s.notifications.articleUpdates ?? false, marketingEmails: s.notifications.marketingEmails ?? false });
+          setPreferences({ theme: s.preferences.theme || 'system', language: s.preferences.language || 'en', timezone: s.preferences.timezone || 'America/Los_Angeles', defaultContentType: s.preferences.defaultContentType || 'blog', autoSave: s.preferences.autoSave ?? true, wordCountDisplay: s.preferences.wordCountDisplay ?? true });
+          setApiSettings({ apiKey: s.api.apiKey || '', rateLimit: s.api.rateLimit || 100, webhookUrl: s.api.webhookUrl || '', enableWebhooks: s.api.enableWebhooks ?? false });
+          // FIX: load persisted privacy settings
+          if (s.privacy) {
+            setPrivacySettings({ analyticsTracking: s.privacy.analyticsTracking ?? true, dataSharing: s.privacy.dataSharing ?? false, cookiePreferences: s.privacy.cookiePreferences ?? true });
+          }
+        }
+      } catch (err: any) {
+        setError('Failed to load settings');
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadSettings();
+  }, []);
+
+  const tabs = [
+    { id: 'profile',       name: 'Profile',           icon: User },
+    { id: 'security',      name: 'Security',           icon: Lock },
+    { id: 'notifications', name: 'Notifications',      icon: Bell },
+    { id: 'preferences',   name: 'Preferences',        icon: SettingsIcon },
+    { id: 'api',           name: 'API & Integrations', icon: Key },
+    { id: 'data',          name: 'Data & Privacy',     icon: Shield },
+  ];
+
+  // FIX: each section tracks its own status
+  const handleSave = async (section: string) => {
+    setSectionStatus(section, 'saving');
+    setError('');
+    try {
+      let response: any;
+      switch (section) {
+        case 'profile':
+          response = await settingsAPI.updateProfile(profileData);
+          if (response.data.success) await refreshUser();
+          break;
+        case 'notifications':
+          response = await settingsAPI.updateNotifications(notificationSettings);
+          break;
+        case 'preferences':
+          response = await settingsAPI.updatePreferences(preferences as any);
+          break;
+        case 'api':
+          response = await settingsAPI.updateApiSettings(apiSettings);
+          if (response.data.success && response.data.data?.apiKey) {
+            setApiSettings(prev => ({ ...prev, apiKey: response.data.data.apiKey }));
+          }
+          break;
+        case 'security':
+          if (!passwordData.currentPassword || !passwordData.newPassword || !passwordData.confirmPassword) throw new Error('All password fields are required');
+          if (passwordData.newPassword !== passwordData.confirmPassword) throw new Error('New passwords do not match');
+          response = await settingsAPI.changePassword(passwordData);
+          setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
+          break;
+        case 'privacy':
+          response = await (settingsAPI as any).updatePrivacy(privacySettings);
+          break;
+        default:
+          throw new Error('Unknown section');
+      }
+      if (response.data.success) {
+        setSectionStatus(section, 'saved');
+        setTimeout(() => setSectionStatus(section, 'idle'), 2000);
+      } else {
+        throw new Error(response.data.message || 'Save failed');
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to save changes');
+      setSectionStatus(section, 'error');
+      setTimeout(() => setSectionStatus(section, 'idle'), 3000);
+    }
+  };
+
+  const handleExport = async (format: 'json' | 'csv') => {
+    try {
+      const response = await settingsAPI.exportData(format);
+      if (format === 'json') {
+        const blob = new Blob([JSON.stringify(response.data.data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = 'user-data.json'; a.click();
+        URL.revokeObjectURL(url);
+      } else {
+        const url = URL.createObjectURL(response.data as Blob);
+        const a = document.createElement('a'); a.href = url; a.download = 'user-data.csv'; a.click();
+        URL.revokeObjectURL(url);
+      }
+    } catch (err: any) {
+      setError('Failed to export data');
+    }
+  };
+
+  const handleRegenerateApiKey = async () => {
+    try {
+      setSectionStatus('api', 'saving');
+      const response = await settingsAPI.updateApiSettings({ regenerateApiKey: true });
+      if (response.data.success) {
+        setApiSettings(prev => ({ ...prev, apiKey: response.data.data.apiKey }));
+        setSectionStatus('api', 'saved');
+        setTimeout(() => setSectionStatus('api', 'idle'), 2000);
+      }
+    } catch (err: any) {
+      setError('Failed to regenerate API key');
+      setSectionStatus('api', 'error');
+      setTimeout(() => setSectionStatus('api', 'idle'), 3000);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!deleteConfirmation.password) { setError('Password is required to delete account'); return; }
+    if (!window.confirm('Are you absolutely sure? This action cannot be undone.')) return;
+    try {
+      setSectionStatus('delete', 'saving');
+      const response = await settingsAPI.deleteAccount({ confirmPassword: deleteConfirmation.password });
+      if (response.data.success) window.location.href = '/login?deleted=true';
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to delete account');
+      setSectionStatus('delete', 'error');
+      setTimeout(() => setSectionStatus('delete', 'idle'), 3000);
+    } finally {
+      setDeleteConfirmation({ showModal: false, password: '' });
+    }
+  };
+
+  // FIX: SaveButton reads from section-specific status
+  const SaveButton = ({ section }: { section: string }) => {
+    const status = getSaveStatus(section);
+    return (
+      <button
+        onClick={() => handleSave(section)}
+        disabled={status === 'saving'}
+        className="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white text-sm font-medium rounded-lg transition-colors"
+      >
+        {status === 'saving' ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Saving...</>
+         : status === 'saved' ? <><Check className="w-4 h-4 mr-2" />Saved!</>
+         : <><Save className="w-4 h-4 mr-2" />Save Changes</>}
+      </button>
+    );
+  };
+
+  const renderProfileTab = () => (
+    <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
+      <div className="mb-6">
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Profile Information</h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Update your personal information and profile details.</p>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Full Name</label>
+          <input type="text" value={profileData.name} onChange={e => setProfileData({ ...profileData, name: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Email Address</label>
+          <input type="email" value={profileData.email} onChange={e => setProfileData({ ...profileData, email: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Company</label>
+          <input type="text" value={profileData.company} onChange={e => setProfileData({ ...profileData, company: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Location</label>
+          <input type="text" value={profileData.location} onChange={e => setProfileData({ ...profileData, location: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+        </div>
+        <div className="md:col-span-2">
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Website</label>
+          <input type="url" value={profileData.website} onChange={e => setProfileData({ ...profileData, website: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+        </div>
+        <div className="md:col-span-2">
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Bio</label>
+          <textarea rows={4} value={profileData.bio} onChange={e => setProfileData({ ...profileData, bio: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white" placeholder="Tell us about yourself..." />
+        </div>
+      </div>
+      <div className="flex justify-end mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
+        <SaveButton section="profile" />
+      </div>
+    </div>
+  );
+
+  const renderSecurityTab = () => (
+    <div className="space-y-6">
+      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
+        <div className="mb-6">
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Change Password</h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Update your password to keep your account secure.</p>
+        </div>
+        <div className="space-y-4 max-w-md">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Current Password</label>
+            <div className="relative">
+              <input type={showCurrentPassword ? 'text' : 'password'} value={passwordData.currentPassword} onChange={e => setPasswordData({ ...passwordData, currentPassword: e.target.value })} className="w-full px-3 py-2 pr-10 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+              <button type="button" onClick={() => setShowCurrentPassword(!showCurrentPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                {showCurrentPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">New Password</label>
+            <div className="relative">
+              <input type={showNewPassword ? 'text' : 'password'} value={passwordData.newPassword} onChange={e => setPasswordData({ ...passwordData, newPassword: e.target.value })} className="w-full px-3 py-2 pr-10 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+              <button type="button" onClick={() => setShowNewPassword(!showNewPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Confirm New Password</label>
+            <input type="password" value={passwordData.confirmPassword} onChange={e => setPasswordData({ ...passwordData, confirmPassword: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+          </div>
+        </div>
+        <div className="flex justify-end mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
+          <SaveButton section="security" />
+        </div>
+      </div>
+
+      {/* FIX: 2FA button replaced with Coming Soon — was a no-op onClick */}
+      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
+        <div className="mb-6">
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Two-Factor Authentication</h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Add an extra layer of security to your account.</p>
+        </div>
+        <div className="bg-gray-50 dark:bg-gray-900/30 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+          <div className="flex items-start space-x-3">
+            <Smartphone className="w-5 h-5 text-gray-400 mt-0.5" />
+            <div>
+              <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">Two-Factor Authentication</h4>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Enhanced account security via authenticator app or SMS.</p>
+              <div className="mt-3 inline-flex items-center px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 text-sm font-medium rounded-lg">
+                <Lock className="w-4 h-4 mr-2" />
+                Coming Soon
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderNotificationsTab = () => (
+    <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
+      <div className="mb-6">
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Notification Preferences</h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Choose how you want to be notified about important updates.</p>
+      </div>
+      <div className="space-y-6">
+        {(Object.entries(notificationSettings) as [string, boolean][]).map(([key, value]) => (
+          <div key={key} className="flex items-center justify-between py-3 border-b border-gray-100 dark:border-gray-700 last:border-b-0">
+            <div>
+              <h4 className="text-sm font-medium text-gray-900 dark:text-white">
+                {key.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase())}
+              </h4>
+              <p className="text-sm text-gray-500 dark:text-gray-400">{getNotificationDescription(key)}</p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input type="checkbox" checked={value} onChange={e => setNotificationSettings({ ...notificationSettings, [key]: e.target.checked })} className="sr-only peer" />
+              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+            </label>
+          </div>
+        ))}
+      </div>
+      <div className="flex justify-end mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
+        <SaveButton section="notifications" />
+      </div>
+    </div>
+  );
+
+  const getNotificationDescription = (key: string) => {
+    const d: Record<string, string> = {
+      emailNotifications: 'Receive email notifications for important updates',
+      pushNotifications:  'Get push notifications in your browser',
+      weeklyReports:      'Weekly summary of your content performance',
+      creditAlerts:       'Alerts when your credits are running low',
+      articleUpdates:     'Notifications when articles are published',
+      marketingEmails:    'Product updates and marketing communications',
+    };
+    return d[key] || '';
+  };
+
+  const renderPreferencesTab = () => (
+    <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
+      <div className="mb-6">
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Application Preferences</h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Customize your application experience and settings.</p>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Theme</label>
+          <select value={preferences.theme} onChange={e => setPreferences({ ...preferences, theme: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+            <option value="system">System Default</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Language</label>
+          <select value={preferences.language} onChange={e => setPreferences({ ...preferences, language: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+            <option value="en">English</option><option value="es">Español</option>
+            <option value="fr">Français</option><option value="de">Deutsch</option>
+            <option value="it">Italiano</option><option value="pt">Português</option>
+          </select>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Timezone</label>
+          <select value={preferences.timezone} onChange={e => setPreferences({ ...preferences, timezone: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+            <option value="America/Los_Angeles">Pacific Time</option>
+            <option value="America/Denver">Mountain Time</option>
+            <option value="America/Chicago">Central Time</option>
+            <option value="America/New_York">Eastern Time</option>
+            <option value="Europe/London">London (GMT)</option>
+            <option value="Europe/Paris">Paris (CET)</option>
+            <option value="Asia/Tokyo">Tokyo (JST)</option>
+            <option value="Australia/Sydney">Sydney (AEST)</option>
+            <option value="Africa/Lagos">Lagos (WAT)</option>
+          </select>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Default Content Type</label>
+          <select value={preferences.defaultContentType} onChange={e => setPreferences({ ...preferences, defaultContentType: e.target.value })} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+            <option value="blog">Blog Post</option><option value="article">Article</option>
+            <option value="social">Social Media</option><option value="email">Email</option>
+            <option value="product">Product Description</option><option value="landing">Landing Page</option>
+          </select>
+        </div>
+      </div>
+      <div className="space-y-4 mb-6">
+        {[
+          { key: 'autoSave', label: 'Auto Save', desc: 'Automatically save your work as you type' },
+          { key: 'wordCountDisplay', label: 'Word Count Display', desc: 'Show word count while writing content' },
+        ].map(({ key, label, desc }) => (
+          <div key={key} className="flex items-center justify-between py-3 border-b border-gray-100 dark:border-gray-700 last:border-b-0">
+            <div><h4 className="text-sm font-medium text-gray-900 dark:text-white">{label}</h4><p className="text-sm text-gray-500 dark:text-gray-400">{desc}</p></div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input type="checkbox" checked={(preferences as any)[key]} onChange={e => setPreferences({ ...preferences, [key]: e.target.checked })} className="sr-only peer" />
+              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+            </label>
+          </div>
+        ))}
+      </div>
+      <div className="flex justify-end pt-6 border-t border-gray-200 dark:border-gray-700">
+        <SaveButton section="preferences" />
+      </div>
+    </div>
+  );
+
+  const renderApiTab = () => (
+    <div className="space-y-6">
+      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
+        <div className="mb-6">
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">API Access</h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Manage your API keys and integration settings.</p>
+        </div>
+        <div className="space-y-6">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">API Key</label>
+            <div className="flex space-x-2">
+              <div className="flex-1 relative">
+                <input type={showPassword ? 'text' : 'password'} value={apiSettings.apiKey} readOnly className="w-full px-3 py-2 pr-10 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white" />
+                <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              <button onClick={handleRegenerateApiKey} disabled={getSaveStatus('api') === 'saving'} className="px-4 py-2 bg-gray-600 hover:bg-gray-700 disabled:bg-gray-400 text-white text-sm font-medium rounded-lg transition-colors">
+                {getSaveStatus('api') === 'saving' ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Regenerate'}
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Keep your API key secure. Don't share it publicly.</p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Rate Limit (requests per minute)</label>
+            <input type="number" value={apiSettings.rateLimit} onChange={e => setApiSettings({ ...apiSettings, rateLimit: parseInt(e.target.value) || 100 })} min="1" max="1000" className="w-full max-w-xs px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+          </div>
+        </div>
+      </div>
+      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
+        <div className="mb-6">
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Webhooks</h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Configure webhook notifications for your applications.</p>
+        </div>
+        <div className="space-y-4">
+          <div className="flex items-center justify-between py-3 border-b border-gray-100 dark:border-gray-700">
+            <div><h4 className="text-sm font-medium text-gray-900 dark:text-white">Enable Webhooks</h4><p className="text-sm text-gray-500 dark:text-gray-400">Receive HTTP notifications for events</p></div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input type="checkbox" checked={apiSettings.enableWebhooks} onChange={e => setApiSettings({ ...apiSettings, enableWebhooks: e.target.checked })} className="sr-only peer" />
+              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+            </label>
+          </div>
+          {apiSettings.enableWebhooks && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Webhook URL</label>
+              <input type="url" value={apiSettings.webhookUrl} onChange={e => setApiSettings({ ...apiSettings, webhookUrl: e.target.value })} placeholder="https://your-app.com/webhook" className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+            </div>
+          )}
+        </div>
+        <div className="flex justify-end mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
+          <SaveButton section="api" />
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderDataTab = () => (
+    <div className="space-y-6">
+      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
+        <div className="mb-6">
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Data Export</h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Download your data and content in various formats.</p>
+        </div>
+        <div className="space-y-4">
+          {[
+            { label: 'Export All Data', desc: 'Download all your profile data and settings', format: 'json' as const, btnLabel: 'Export JSON' },
+            { label: 'Export Profile Data', desc: 'Download your profile information in CSV format', format: 'csv' as const, btnLabel: 'Export CSV' },
+          ].map(({ label, desc, format, btnLabel }) => (
+            <div key={format} className="flex items-center justify-between py-4 border border-gray-200 dark:border-gray-700 rounded-lg px-4">
+              <div><h4 className="text-sm font-medium text-gray-900 dark:text-white">{label}</h4><p className="text-sm text-gray-500 dark:text-gray-400">{desc}</p></div>
+              <button onClick={() => handleExport(format)} className="inline-flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg transition-colors">
+                <Download className="w-4 h-4 mr-2" />{btnLabel}
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* FIX: Privacy settings now have a working Save button */}
+      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
+        <div className="mb-6">
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Privacy Settings</h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Control how your data is used and shared.</p>
+        </div>
+        <div className="space-y-4">
+          {[
+            { key: 'analyticsTracking', label: 'Analytics Tracking', desc: 'Allow us to collect usage data to improve the service' },
+            { key: 'dataSharing',       label: 'Data Sharing',       desc: 'Share anonymized data with partners for research purposes' },
+            { key: 'cookiePreferences', label: 'Cookie Preferences', desc: 'Allow non-essential cookies for enhanced experience' },
+          ].map(({ key, label, desc }) => (
+            <div key={key} className="flex items-center justify-between py-3 border-b border-gray-100 dark:border-gray-700 last:border-b-0">
+              <div><h4 className="text-sm font-medium text-gray-900 dark:text-white">{label}</h4><p className="text-sm text-gray-500 dark:text-gray-400">{desc}</p></div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" checked={(privacySettings as any)[key]} onChange={e => setPrivacySettings(prev => ({ ...prev, [key]: e.target.checked }))} className="sr-only peer" />
+                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+              </label>
+            </div>
+          ))}
+        </div>
+        <div className="flex justify-end mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
+          <SaveButton section="privacy" />
+        </div>
+      </div>
+
+      <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-6">
+        <div className="mb-4">
+          <h3 className="text-lg font-semibold text-red-800 dark:text-red-200 flex items-center">
+            <AlertTriangle className="w-5 h-5 mr-2" />Danger Zone
+          </h3>
+          <p className="text-sm text-red-700 dark:text-red-300 mt-1">These actions cannot be undone. Please proceed with caution.</p>
+        </div>
+        <div className="flex items-center justify-between py-4 border border-red-200 dark:border-red-800 rounded-lg px-4 bg-white dark:bg-red-900/10">
+          <div><h4 className="text-sm font-medium text-gray-900 dark:text-white">Delete Account</h4><p className="text-sm text-gray-500 dark:text-gray-400">Permanently delete your account and all associated data</p></div>
+          <button onClick={() => setDeleteConfirmation({ showModal: true, password: '' })} className="inline-flex items-center px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg transition-colors">
+            <Trash2 className="w-4 h-4 mr-2" />Delete Account
+          </button>
+        </div>
+      </div>
+
+      {deleteConfirmation.showModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-lg max-w-md w-full p-6 shadow-xl">
+            <div className="mb-4">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center">
+                <AlertTriangle className="w-5 h-5 mr-2 text-red-600" />Confirm Account Deletion
+              </h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">This action cannot be undone. All your data will be permanently deleted.</p>
+            </div>
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Enter your password to confirm</label>
+              <input type="password" value={deleteConfirmation.password} onChange={e => setDeleteConfirmation(prev => ({ ...prev, password: e.target.value }))} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-red-500 focus:border-transparent" placeholder="Enter your password" />
+            </div>
+            <div className="flex items-center justify-end space-x-3">
+              <button onClick={() => setDeleteConfirmation({ showModal: false, password: '' })} className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors">Cancel</button>
+              <button onClick={handleDeleteAccount} disabled={!deleteConfirmation.password || getSaveStatus('delete') === 'saving'} className="inline-flex items-center px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors">
+                {getSaveStatus('delete') === 'saving' ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Deleting...</> : <><Trash2 className="w-4 h-4 mr-2" />Delete Account</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  const renderTabContent = () => {
+    switch (activeTab) {
+      case 'profile':       return renderProfileTab();
+      case 'security':      return renderSecurityTab();
+      case 'notifications': return renderNotificationsTab();
+      case 'preferences':   return renderPreferencesTab();
+      case 'api':           return renderApiTab();
+      case 'data':          return renderDataTab();
+      default:              return renderProfileTab();
+    }
+  };
+
+  if (loading) {
+    return (
+      <DashboardLayout>
+        <div className="max-w-6xl mx-auto p-6">
+          <div className="flex items-center justify-center min-h-64">
+            <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+          </div>
+        </div>
+      </DashboardLayout>
+    );
+  }
+
+  return (
+    <DashboardLayout>
+      <div className="max-w-6xl mx-auto p-6">
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Settings</h1>
+          <p className="text-gray-600 dark:text-gray-400 mt-2">Manage your account settings and preferences</p>
+        </div>
+
+        {error && (
+          <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+            <div className="flex items-center">
+              <AlertTriangle className="w-5 h-5 text-red-600 dark:text-red-400 mr-2" />
+              <p className="text-sm text-red-800 dark:text-red-200">{error}</p>
+            </div>
+          </div>
+        )}
+
+        <div className="flex flex-col lg:flex-row gap-6">
+          <div className="lg:w-1/4">
+            <nav className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-2">
+              {tabs.map(tab => {
+                const Icon = tab.icon;
+                return (
+                  <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+                    className={`w-full flex items-center px-3 py-2 text-left text-sm font-medium rounded-lg transition-colors ${activeTab === tab.id ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}`}
+                  >
+                    <Icon className="w-4 h-4 mr-3" />{tab.name}
+                  </button>
+                );
+              })}
+            </nav>
+          </div>
+          <div className="lg:w-3/4">{renderTabContent()}</div>
+        </div>
+      </div>
+    </DashboardLayout>
+  );
+};
+
+export default SettingsPage;
+
+
+========================================
+FILE: src\app\(auth)\login\page.tsx
+========================================
+
+'use client';
+
+import { useState, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
+import { Eye, EyeOff, Mail, Lock, AlertCircle } from 'lucide-react';
+import { z } from 'zod';
+import { useAuth } from '@/context/AuthProvider';
+import { authAPI } from '@/lib/api';
+
+// Form validation schema
+const loginSchema = z.object({
+  email: z.string().email('Invalid email address'),
+  password: z.string().min(6, 'Password must be at least 6 characters'),
+  rememberMe: z.boolean().optional()
+});
+
+export default function LoginPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const { login, isAuthenticated, isAdmin, getDefaultRoute, loading: authLoading } = useAuth();
+  
+  // State management
+  const [showPassword, setShowPassword] = useState(false);
+  const [formData, setFormData] = useState({
+    email: '',
+    password: '',
+    rememberMe: false
+  });
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [notVerified, setNotVerified] = useState(false);
+  const [passwordStrength, setPasswordStrength] = useState<null | number>(null);
+  const [hasRedirected, setHasRedirected] = useState(false);
+
+  // Smart redirect logic with admin detection
+  useEffect(() => {
+    if (isAuthenticated && !authLoading && !hasRedirected) {
+      
+      setHasRedirected(true);
+      
+      const redirectParam = searchParams?.get('redirect');
+      let redirectPath: string;
+      
+      if (redirectParam) {
+        redirectPath = redirectParam;
+      } else {
+        redirectPath = getDefaultRoute();
+      }
+      
+      router.replace(redirectPath);
+    }
+  }, [isAuthenticated, authLoading, hasRedirected, isAdmin, getDefaultRoute, router, searchParams]);
+
+  /**
+   * Handles form submission using AuthProvider
+   */
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (isAuthenticated || hasRedirected || isLoading) {
+      return;
+    }
+
+    setIsLoading(true);
+    setError('');
+    setNotVerified(false);
+
+    try {
+      
+      loginSchema.parse(formData);
+      await login(formData.email, formData.password, formData.rememberMe);
+      
+      
+    } catch (err: any) {
+
+      if (err instanceof z.ZodError) {
+        setError(err.errors[0].message);
+      } else if (err.code === 'NETWORK_ERROR' || err.message?.includes('Network Error') || err.message?.includes('connect ECONNREFUSED')) {
+        setError('Unable to connect to server. Please check your internet connection or contact support if the issue persists.');
+      } else if (err.response?.status === 429) {
+        setError('Too many login attempts. Please wait a few minutes before trying again.');
+      } else if (err.response?.status === 500) {
+        setError('Server error. Our team has been notified. Please try again later.');
+      } else if (
+        (err.response?.status === 401 && err.response?.data?.message?.toLowerCase().includes('not verified')) ||
+        err.message?.toLowerCase().includes('not verified')
+      ) {
+        setNotVerified(true);
+        setError(err.response?.data?.message || err.message);
+      } else if (err.response?.status === 401) {
+        setNotVerified(false);
+        setError('Invalid email or password. Please check your credentials.');
+      } else {
+        setNotVerified(false);
+        setError(err.message || 'Login failed. Please check your credentials.');
+      }
+
+      setIsLoading(false);
+    }
+  };
+
+  /**
+   * Handles input changes
+   */
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value, type, checked } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : value
+    }));
+
+    if (name === 'password') {
+      setPasswordStrength(Math.min(Math.floor(value.length / 2), 5));
+    }
+    
+    if (error) setError('');
+    if (notVerified) setNotVerified(false);
+  };
+
+  /**
+   * Handles resending the verification email
+   */
+  const handleResendVerification = async () => {
+    try {
+      await authAPI.post('/auth/resend-verification', { email: formData.email });
+      setError('');
+      setNotVerified(false);
+      router.push(`/auth/verify-email?email=${encodeURIComponent(formData.email)}`);
+    } catch (e: any) {
+      setError(e.response?.data?.message || 'Failed to resend verification email. Please try again.');
+    }
+  };
+
+  /**
+   * Handles social login
+   */
+  const handleSocialLogin = async (provider: 'twitter') => {
+    try {
+      setIsLoading(true);
+      setError('');
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      setError(`${provider} login is not implemented yet`);
+    } catch (err: any) {
+      setError(err.message || `${provider} login is currently unavailable`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const isFormLoading = isLoading || authLoading || hasRedirected;
+
+  if (isAuthenticated && (authLoading || hasRedirected)) {
+    const redirectType = isAdmin ? 'admin panel' : 'dashboard';
+    return (
+      <div className="w-full max-w-md mx-auto text-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+        <p className="mt-4 text-gray-600">Redirecting to {redirectType}...</p>
+        {isAdmin && (
+          <p className="mt-2 text-sm text-blue-600">Welcome, Administrator!</p>
+        )}
+      </div>
+    );
+  }
+
+  if (isAuthenticated && !authLoading) {
+    return (
+      <div className="w-full max-w-md mx-auto text-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+        <p className="mt-4 text-gray-600">Already logged in, redirecting...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full max-w-md mx-auto">
+      <div className="text-center mb-8">
+        <h2 className="text-3xl font-bold text-gray-900 mb-2">Welcome back</h2>
+        <p className="text-gray-600">Sign in to your ContentAI Pro account</p>
+      </div>
+
+      {error && (
+        <div className="mb-6 p-4 border border-red-300 rounded-md bg-red-50 flex items-start">
+          <AlertCircle className="h-5 w-5 text-red-400 mt-0.5 mr-3 flex-shrink-0" />
+          <div className="flex-1">
+            <h3 className="text-sm font-medium text-red-800">Error</h3>
+            <div className="mt-1 text-sm text-red-700">{error}</div>
+            {notVerified && (
+              <button
+                type="button"
+                onClick={handleResendVerification}
+                className="mt-3 inline-flex items-center text-sm font-medium text-red-800 underline hover:text-red-600"
+              >
+                Resend verification email
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit} className="space-y-6">
+        {/* Email Field */}
+        <div>
+          <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
+            Email address
+          </label>
+          <div className="relative">
+            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+              <Mail className="h-5 w-5 text-gray-400" />
+            </div>
+            <input
+              id="email"
+              name="email"
+              type="email"
+              required
+              value={formData.email}
+              onChange={handleChange}
+              className="block w-full rounded-md border border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 py-2 px-3 pl-10"
+              placeholder="Enter your email"
+              disabled={isFormLoading}
+              autoComplete="email"
+            />
+          </div>
+        </div>
+
+        {/* Password Field with strength meter */}
+        <div>
+          <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
+            Password
+          </label>
+          <div className="relative">
+            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+              <Lock className="h-5 w-5 text-gray-400" />
+            </div>
+            <input
+              id="password"
+              name="password"
+              type={showPassword ? 'text' : 'password'}
+              required
+              value={formData.password}
+              onChange={handleChange}
+              className="block w-full rounded-md border border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 py-2 px-3 pl-10 pr-10"
+              placeholder="Enter your password"
+              disabled={isFormLoading}
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+              className="absolute inset-y-0 right-0 pr-3 flex items-center"
+              disabled={isFormLoading}
+              aria-label={showPassword ? 'Hide password' : 'Show password'}
+            >
+              {showPassword ? (
+                <EyeOff className="h-5 w-5 text-gray-400 hover:text-gray-600" />
+              ) : (
+                <Eye className="h-5 w-5 text-gray-400 hover:text-gray-600" />
+              )}
+            </button>
+          </div>
+          {formData.password && (
+            <div className="mt-1 flex gap-1">
+              {[...Array(5)].map((_, i) => (
+                <div 
+                  key={i}
+                  className={`h-1 flex-1 rounded-sm ${
+                    (passwordStrength || 0) > i 
+                      ? 'bg-green-500' 
+                      : 'bg-gray-200'
+                  }`}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Remember Me & Forgot Password */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center">
+            <input
+              id="rememberMe"
+              name="rememberMe"
+              type="checkbox"
+              checked={formData.rememberMe}
+              onChange={handleChange}
+              className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+              disabled={isFormLoading}
+            />
+            <label htmlFor="rememberMe" className="ml-2 block text-sm text-gray-700">
+              Remember me
+            </label>
+          </div>
+          <Link 
+            href="/forgot-password" 
+            className="text-sm text-blue-600 hover:text-blue-500"
+            onClick={(e) => isFormLoading && e.preventDefault()}
+          >
+            Forgot password?
+          </Link>
+        </div>
+
+        {/* Submit Button */}
+        <button
+          type="submit"
+          disabled={isFormLoading}
+          className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {isFormLoading ? (
+            <>
+              <svg 
+                className="animate-spin -ml-1 mr-3 h-5 w-5 text-white inline" 
+                xmlns="http://www.w3.org/2000/svg" 
+                fill="none" 
+                viewBox="0 0 24 24"
+              >
+                <circle 
+                  className="opacity-25" 
+                  cx="12" 
+                  cy="12" 
+                  r="10" 
+                  stroke="currentColor" 
+                  strokeWidth="4"
+                />
+                <path 
+                  className="opacity-75" 
+                  fill="currentColor" 
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                />
+              </svg>
+              Signing in...
+            </>
+          ) : (
+            'Sign in'
+          )}
+        </button>
+      </form>
+
+      {/* Social Login Section */}
+      <div className="mt-6">
+        <div className="relative">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-gray-300" />
+          </div>
+          <div className="relative flex justify-center text-sm">
+            <span className="px-2 bg-white text-gray-500">Or continue with</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-6 grid grid-cols-2 gap-3">
+        {/* Google OAuth button */}
+        <a
+          href={`${process.env.NEXT_PUBLIC_API_URL}/auth/google`}
+          className={`w-full inline-flex justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 ${isFormLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+          onClick={(e) => {
+            if (isFormLoading) e.preventDefault();
+            setIsLoading(true);
+          }}
+        >
+          <svg className="h-5 w-5" viewBox="0 0 24 24">
+            <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
+            <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
+            <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
+            <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
+          </svg>
+          <span className="ml-2">Google</span>
+        </a>
+
+        {/* Twitter OAuth button */}
+        <a
+          href={`${process.env.NEXT_PUBLIC_API_URL}/auth/twitter`}
+          className={`w-full inline-flex justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 ${isFormLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+          onClick={(e) => {
+            if (isFormLoading) e.preventDefault();
+            setIsLoading(true);
+          }}
+        >
+          <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+          </svg>
+          <span className="ml-2">Twitter</span>
+        </a>
+      </div>
+
+      <p className="mt-8 text-center text-sm text-gray-600">
+        Don't have an account?{' '}
+        <Link 
+          href="/register" 
+          className="font-medium text-blue-600 hover:text-blue-500"
+          onClick={(e) => isFormLoading && e.preventDefault()}
+        >
+          Sign up for free
+        </Link>
+      </p>
+
+      {process.env.NODE_ENV === 'development' && (
+        <div className="mt-4 p-2 bg-gray-100 rounded text-xs space-y-1">
+          <div>Auth Loading: {authLoading ? 'Yes' : 'No'}</div>
+          <div>Is Authenticated: {isAuthenticated ? 'Yes' : 'No'}</div>
+          <div>Is Admin: {isAdmin ? 'Yes' : 'No'}</div>
+          <div>Form Loading: {isLoading ? 'Yes' : 'No'}</div>
+          <div>Has Redirected: {hasRedirected ? 'Yes' : 'No'}</div>
+          <div>Not Verified: {notVerified ? 'Yes' : 'No'}</div>
+          <div>Default Route: {isAuthenticated ? getDefaultRoute() : 'N/A'}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+========================================
+FILE: src\app\articles\create\page.tsx
+========================================
+
+'use client';
+import { useState, useEffect, useRef } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
+import DashboardLayout from '@/components/layout/DashboardLayout';
+import { useAuth } from '@/context/AuthProvider';
+import { keywordsAPI, contentAPI, sitesAPI, sitemapAPI, knowledgebaseAPI } from '@/lib/api';
+import ScheduleModal from '@/components/scheduler/ScheduleModal';
+import PublishProgressModal, { PublishStep } from '@/components/articles/PublishProgressModal';
+import type { InternalLinkSuggestion, KnowledgeDoc } from '@/types';
+import {
+  FileText,
+  Wand2,
+  Eye,
+  Save,
+  Send,
+  ArrowRight,
+  ChevronDown,
+  ChevronUp,
+  Clock,
+  Target,
+  Lightbulb,
+  BookOpen,
+  Settings,
+  RefreshCw,
+  Check,
+  X,
+  Plus,
+  Minus,
+  Edit3,
+  Download,
+  AlertCircle,
+  CheckCircle,
+  Globe,
+  ExternalLink,
+  Link,
+  BarChart3,
+  ShoppingCart,
+  MessageSquare,
+  Sparkles,
+  Brain,
+  Layers,
+  Zap,
+  Calendar,
+  Link2
+} from 'lucide-react';
+
+export type ContentMode = 'seo_blog' | 'news' | 'academic' | 'technical' | 'commercial' | 'opinion' | 'listicle';
+
+const MODEL_CONFIG: Record<string, { label: string; description: string; creditMultiplier: number; icon: string }> = {
+  gemini: {
+    label: 'Fast',
+    description: 'Gemini 2.5 Flash – quick generation',
+    creditMultiplier: 1,
+    icon: '⚡'
+  },
+  'gemini-pro': {
+    label: 'Balanced',
+    description: 'Gemini 2.5 Pro + Google Search – researched content',
+    creditMultiplier: 2,
+    icon: '🌟'
+  },
+  gpt4o: {
+    label: 'Premium',
+    description: 'GPT-4o – high-quality nuanced content',
+    creditMultiplier: 3,
+    icon: '🧠'
+  },
+  claude: {
+    label: 'Elite',
+    description: 'Claude 3.5 Sonnet – deepest analysis',
+    creditMultiplier: 5,
+    icon: '💎'
+  }
+};
+
+const CONTENT_MODES: Record<ContentMode, {
+  label: string;
+  icon: string;
+  description: string;
+  defaults: {
+    wordCount: number;
+    includeFAQ: boolean;
+    includeStatistics: boolean;
+    includeExamples: boolean;
+    includeComparisons: boolean;
+    includeConclusion: boolean;
+  };
+}> = {
+  seo_blog: {
+    label: 'SEO Blog',
+    icon: '📝',
+    description: 'Conversational evergreen post, question-based headings, featured snippet optimized',
+    defaults: { wordCount: 1500, includeFAQ: true, includeStatistics: true, includeExamples: true, includeComparisons: false, includeConclusion: true }
+  },
+  news: {
+    label: 'News / Reporting',
+    icon: '📰',
+    description: 'Inverted pyramid, 5Ws lead, factual attribution, authority commentary',
+    defaults: { wordCount: 800, includeFAQ: false, includeStatistics: false, includeExamples: false, includeComparisons: false, includeConclusion: true }
+  },
+  academic: {
+    label: 'Academic / Research',
+    icon: '🎓',
+    description: 'Abstract, thesis-driven argument, formal register, evidence-based paragraphs with hedging',
+    defaults: { wordCount: 2500, includeFAQ: false, includeStatistics: true, includeExamples: true, includeComparisons: false, includeConclusion: true }
+  },
+  technical: {
+    label: 'Technical / How-To',
+    icon: '⚙️',
+    description: 'Prerequisites, numbered steps, expected outcomes, troubleshooting section',
+    defaults: { wordCount: 2000, includeFAQ: true, includeStatistics: false, includeExamples: true, includeComparisons: false, includeConclusion: true }
+  },
+  commercial: {
+    label: 'Commercial / Review',
+    icon: '🛍️',
+    description: 'Quick verdict, pros/cons, feature breakdown, who it\'s for, final recommendation',
+    defaults: { wordCount: 1500, includeFAQ: false, includeStatistics: true, includeExamples: true, includeComparisons: true, includeConclusion: true }
+  },
+  opinion: {
+    label: 'Opinion / Editorial',
+    icon: '💬',
+    description: 'Strong thesis, evidence-backed arguments, counterargument section, persuasive close',
+    defaults: { wordCount: 1200, includeFAQ: false, includeStatistics: true, includeExamples: true, includeComparisons: false, includeConclusion: true }
+  },
+  listicle: {
+    label: 'Listicle / Roundup',
+    icon: '📋',
+    description: 'Numbered items, consistent per-item structure, scannable, brief sections',
+    defaults: { wordCount: 1500, includeFAQ: false, includeStatistics: false, includeExamples: true, includeComparisons: false, includeConclusion: false }
+  }
+};
+
+interface SavedKeyword {
+  id: string;
+  keyword: string;
+  term?: string;
+  searchVolume: number;
+  volume?: number;
+  difficulty: number;
+  status: 'available' | 'used';
+}
+
+interface Site {
+  id: string;
+  name: string;
+  url: string;
+  isActive: boolean;
+  createdAt: string;
+}
+
+interface EnhancedGenerationSettings {
+  contentMode: ContentMode;
+  wordCount: number;
+  includeIntro: boolean;
+  includeConclusion: boolean;
+  includeFAQ: boolean;
+  targetAudience: string;
+  extraInstructions: string;
+  contentIntent: 'informational' | 'navigational' | 'commercial' | 'transactional';
+  customPrompt: string;
+  additionalContext: string;
+  seoFocus: 'primary_keyword' | 'semantic_keywords' | 'long_tail' | 'balanced';
+  callToAction: string;
+  includeStatistics: boolean;
+  includeExamples: boolean;
+  includeComparisons: boolean;
+  targetKeywordDensity: number;
+  includeInternalLinks: boolean;
+  internalLinkDensity: number;
+  maxInternalLinks: number;
+  selectedDocIds: string[];
+  includeExternalLinks: boolean;
+}
+
+interface GeneratedContent {
+  id: string;
+  title: string;
+  content: string;
+  wordCount: number;
+  readingTime: number;
+  seoScore: number;
+  site?: { id: string; name: string; url: string } | null;
+}
+
+export default function EnhancedCreateArticlePage() {
+  const { user, refreshUser } = useAuth();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  const [step, setStep] = useState<'keyword' | 'site' | 'generate' | 'edit'>('keyword');
+  const [selectedKeyword, setSelectedKeyword] = useState<SavedKeyword | null>(null);
+  const [savedKeywords, setSavedKeywords] = useState<SavedKeyword[]>([]);
+  const [customTopic, setCustomTopic] = useState('');
+  const [generatedContent, setGeneratedContent] = useState<GeneratedContent | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [loadingStage, setLoadingStage] = useState('');
+  const [loadingProgress, setLoadingProgress] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedModel, setSelectedModel] = useState<'gemini' | 'gemini-pro' | 'gpt4o' | 'claude'>('gemini');
+  const [estimatedCredits, setEstimatedCredits] = useState(1500);
+  const [internalLinkSuggestions, setInternalLinkSuggestions] = useState<InternalLinkSuggestion[]>([]);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [showInternalLinks, setShowInternalLinks] = useState(false);
+  const [showScheduleModal, setShowScheduleModal] = useState(false);
+  const [showPublishProgress, setShowPublishProgress] = useState(false);
+  const [publishStep, setPublishStep] = useState<PublishStep>('validating');
+  const [publishError, setPublishError] = useState<string | null>(null);
+  const [linksLastUpdated, setLinksLastUpdated] = useState<Date | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  // Scrape URL state
+  const [scrapeUrl, setScrapeUrl] = useState('');
+  const [scraping, setScraping] = useState(false);
+  const [scrapedText, setScrapedText] = useState('');
+  const [scrapeError, setScrapeError] = useState<string | null>(null);
+
+  // Knowledgebase state
+  const [knowledgeDocs, setKnowledgeDocs] = useState<KnowledgeDoc[]>([]);
+  const [loadingKnowledgeDocs, setLoadingKnowledgeDocs] = useState(false);
+
+  const [settings, setSettings] = useState<EnhancedGenerationSettings>({
+    contentMode: 'seo_blog',
+    wordCount: 1500,
+    includeIntro: true,
+    includeConclusion: true,
+    includeFAQ: true,
+    targetAudience: 'General audience',
+    extraInstructions: '',
+    contentIntent: 'informational',
+    customPrompt: '',
+    additionalContext: '',
+    seoFocus: 'balanced',
+    callToAction: '',
+    includeStatistics: true,
+    includeExamples: true,
+    includeComparisons: false,
+    targetKeywordDensity: 1.5,
+    includeInternalLinks: true,
+    internalLinkDensity: 3,
+    maxInternalLinks: 5,
+    selectedDocIds: [],
+    includeExternalLinks: false
+  });
+
+  const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
+  const [availableSites, setAvailableSites] = useState<Site[]>([]);
+  const [selectedSite, setSelectedSite] = useState<string>('');
+  const [loadingSites, setLoadingSites] = useState(false);
+  const [siteError, setSiteError] = useState<string | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    const multiplier = MODEL_CONFIG[selectedModel].creditMultiplier;
+    setEstimatedCredits(Math.ceil(settings.wordCount * multiplier));
+  }, [selectedModel, settings.wordCount]);
+
+  useEffect(() => {
+    loadSavedKeywords();
+    loadUserSites();
+    loadKnowledgeDocs();
+  }, []);
+
+  useEffect(() => {
+    const keywordFromUrl = searchParams?.get('keyword');
+    if (keywordFromUrl && savedKeywords.length > 0) {
+      const decodedKeyword = decodeURIComponent(keywordFromUrl);
+      const matchingKeyword = savedKeywords.find(k =>
+        (k.keyword?.toLowerCase() === decodedKeyword.toLowerCase()) ||
+        (k.term?.toLowerCase() === decodedKeyword.toLowerCase())
+      );
+      if (matchingKeyword) setSelectedKeyword(matchingKeyword);
+      else setCustomTopic(decodedKeyword);
+    }
+  }, [searchParams, savedKeywords]);
+
+  useEffect(() => {
+    if (step === 'site' && settings.includeInternalLinks && selectedSite && (selectedKeyword || customTopic)) {
+      loadInternalLinkSuggestions();
+    }
+  }, [selectedSite, step]);
+
+  const applyModeDefaults = (mode: ContentMode) => {
+    const defaults = CONTENT_MODES[mode].defaults;
+    setSettings(prev => ({
+      ...prev,
+      contentMode: mode,
+      wordCount: defaults.wordCount,
+      includeFAQ: defaults.includeFAQ,
+      includeStatistics: defaults.includeStatistics,
+      includeExamples: defaults.includeExamples,
+      includeComparisons: defaults.includeComparisons,
+      includeConclusion: defaults.includeConclusion,
+    }));
+  };
+
+  const loadSavedKeywords = async () => {
+    try {
+      const response = await keywordsAPI.getHistory({ limit: 100 });
+      if (response.data.success) {
+        const keywordsData = response.data.data || [];
+        const transformedKeywords: SavedKeyword[] = keywordsData.map((k: any) => ({
+          id: k.id,
+          keyword: k.term || k.keyword,
+          term: k.term || k.keyword,
+          searchVolume: k.volume || k.searchVolume || 0,
+          volume: k.volume || k.searchVolume || 0,
+          difficulty: k.difficulty || 0,
+          status: 'available' as const
+        }));
+        setSavedKeywords(transformedKeywords);
+      }
+    } catch (error) {
+      console.error('Error loading saved keywords:', error);
+      setSavedKeywords([]);
+    }
+  };
+
+  const loadKnowledgeDocs = async () => {
+    try {
+      setLoadingKnowledgeDocs(true);
+      const response = await knowledgebaseAPI.getDocuments();
+      if (response.data.success) {
+        const docs = (response.data.data || []).map((d: any) => ({
+          ...d,
+          id: d._id?.toString() || d.id,
+        }));
+        setKnowledgeDocs(docs);
+      }
+    } catch (error) {
+      console.error('Error loading knowledge docs:', error);
+    } finally {
+      setLoadingKnowledgeDocs(false);
+    }
+  };
+
+  const loadUserSites = async () => {
+    try {
+      setLoadingSites(true);
+      setSiteError(null);
+      const response = await sitesAPI.getUserSites();
+      if (response.data.success) {
+        const sites = response.data.data || [];
+        setAvailableSites(sites);
+        if (sites.length > 0 && !selectedSite) setSelectedSite(sites[0].id);
+      } else {
+        throw new Error(response.data.message || 'Failed to load sites');
+      }
+    } catch (error: any) {
+      console.error('Error loading user sites:', error);
+      setSiteError(error.response?.data?.message || 'Failed to load WordPress sites');
+      setAvailableSites([]);
+    } finally {
+      setLoadingSites(false);
+    }
+  };
+
+  const loadInternalLinkSuggestions = async () => {
+    const topic = selectedKeyword?.keyword || selectedKeyword?.term || customTopic;
+    if (!topic || !selectedSite) return;
+
+    try {
+      setLoadingSuggestions(true);
+      setShowInternalLinks(true);
+      setError(null);
+      setSuccessMessage(null);
+
+      const response = await sitemapAPI.getSuggestions(topic, selectedSite);
+
+      if (response.data.success) {
+        const links = response.data.data || [];
+        setInternalLinkSuggestions(links);
+        setLinksLastUpdated(new Date());
+
+        if (links.length > 0) {
+          setSuccessMessage(`Successfully found ${links.length} relevant internal link${links.length !== 1 ? 's' : ''}`);
+          setTimeout(() => setSuccessMessage(null), 5000);
+        }
+      } else {
+        setInternalLinkSuggestions([]);
+      }
+    } catch (error: any) {
+      console.error('Error loading internal link suggestions:', error);
+      setInternalLinkSuggestions([]);
+      setError(`Failed to load internal links: ${error.response?.data?.message || error.message}`);
+    } finally {
+      setLoadingSuggestions(false);
+    }
+  };
+
+  const handleScrape = async () => {
+    if (!scrapeUrl) return;
+    setScraping(true);
+    setScrapeError(null);
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/scraper/extract`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({ url: scrapeUrl })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setScrapedText(prev => prev + `\n\nFrom ${scrapeUrl}:\n${data.data.text}`);
+        setScrapeUrl('');
+      } else {
+        setScrapeError(data.message || 'Scrape failed');
+      }
+    } catch (err: any) {
+      setScrapeError(err.message);
+    } finally {
+      setScraping(false);
+    }
+  };
+
+  const proceedToSiteSelection = () => {
+    const topic = selectedKeyword?.keyword || selectedKeyword?.term || customTopic;
+    if (!topic) {
+      setError('Please select a keyword or enter a custom topic');
+      return;
+    }
+    setError(null);
+    setStep('site');
+  };
+
+  const proceedToGeneration = () => {
+    if (!selectedSite) {
+      setSiteError('Please select a WordPress site to continue');
+      return;
+    }
+    setSiteError(null);
+    generateContent();
+  };
+
+  const generateContent = async () => {
+    const topic = selectedKeyword?.keyword || selectedKeyword?.term || customTopic;
+    if (!topic) {
+      setError('Please select a keyword or enter a custom topic');
+      return;
+    }
+    if (!selectedSite) {
+      setError('Please select a WordPress site before generating content');
+      setStep('site');
+      return;
+    }
+    if (!user || (user.wordCredits || user.credits || 0) < estimatedCredits) {
+      setError(`Insufficient credits. You need ${estimatedCredits} credits but only have ${user?.wordCredits || user?.credits || 0} remaining.`);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setLoadingStage('Connecting to AI service...');
+    setLoadingProgress(0);
+
+    const progressStages = [
+      { stage: 'Connecting to AI service...', progress: 10 },
+      { stage: 'Analyzing your topic and keywords...', progress: 25 },
+      { stage: settings.includeInternalLinks ? 'Finding relevant internal links...' : 'Generating content with advanced AI...', progress: 40 },
+      { stage: 'Generating content with advanced AI...', progress: 60 },
+      { stage: 'Optimizing for SEO and readability...', progress: 75 },
+      { stage: 'Applying your custom settings...', progress: 85 },
+      { stage: 'Finalizing content structure...', progress: 95 }
+    ];
+
+    let currentStageIndex = 0;
+    progressIntervalRef.current = setInterval(() => {
+      if (currentStageIndex < progressStages.length - 1) {
+        currentStageIndex++;
+        const { stage, progress } = progressStages[currentStageIndex];
+        setLoadingStage(stage);
+        setLoadingProgress(progress);
+      }
+    }, 8000);
+
+    try {
+      const enhancedOptions = {
+        contentMode: settings.contentMode,
+        wordCount: settings.wordCount,
+        targetAudience: settings.targetAudience,
+        includeIntroduction: settings.includeIntro,
+        includeConclusion: settings.includeConclusion,
+        includeFAQ: settings.includeFAQ,
+        contentIntent: settings.contentIntent,
+        customPrompt: settings.customPrompt,
+        selectedDocIds: settings.selectedDocIds,
+        additionalContext: [settings.additionalContext, scrapedText].filter(Boolean).join('\n\n') || undefined,
+        seoFocus: settings.seoFocus,
+        callToAction: settings.callToAction,
+        includeStatistics: settings.includeStatistics,
+        includeExamples: settings.includeExamples,
+        includeComparisons: settings.includeComparisons,
+        targetKeywordDensity: settings.targetKeywordDensity,
+        includeInternalLinks: settings.includeInternalLinks,
+        internalLinkDensity: settings.internalLinkDensity,
+        maxInternalLinks: settings.maxInternalLinks,
+        internalLinkSuggestions: settings.includeInternalLinks ? internalLinkSuggestions : undefined,
+        includeExternalLinks: settings.includeExternalLinks,
+        extraInstructions: [
+          settings.extraInstructions,
+          settings.customPrompt,
+          settings.includeInternalLinks && internalLinkSuggestions.length > 0
+            ? `Include internal links to relevant pages. Available links: ${internalLinkSuggestions.map(s => s.title).join(', ')}`
+            : '',
+          settings.includeExternalLinks ? 'Include relevant external links to authoritative sources.' : ''
+        ].filter(Boolean).join('\n\n')
+      };
+
+      const response = await contentAPI.generateContent({
+        keyword: topic,
+        siteId: selectedSite,
+        model: selectedModel,
+        options: enhancedOptions
+      } as any);
+
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+        progressIntervalRef.current = null;
+      }
+
+      setLoadingStage('Content generated successfully!');
+      setLoadingProgress(100);
+
+      if (response.data.success) {
+        const contentData = response.data.data;
+        setGeneratedContent({
+          id: contentData.id,
+          title: contentData.title,
+          content: contentData.content || contentData.body,
+          wordCount: contentData.wordCount,
+          readingTime: contentData.readingTime,
+          seoScore: contentData.seoScore || 0,
+          site: contentData.site
+        });
+        await refreshUser();
+        setTimeout(() => setStep('generate'), 500);
+      } else {
+        throw new Error(response.data.message || 'Failed to generate content');
+      }
+    } catch (error: any) {
+      console.error('Error generating content:', error);
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+        progressIntervalRef.current = null;
+      }
+      setError(error.response?.data?.message || error.message || 'Failed to generate content. Please try again.');
+    } finally {
+      setLoading(false);
+      setLoadingStage('');
+      setLoadingProgress(0);
+    }
+  };
+
+  const handlePublish = async () => {
+    if (!generatedContent?.id) {
+      setPublishError('No content to publish');
+      return;
+    }
+    setPublishError(null);
+    setShowPublishProgress(true);
+
+    try {
+      setPublishStep('validating');
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      if (!selectedSite) {
+        setPublishError('Please select a WordPress site before publishing');
+        setPublishStep('error');
+        return;
+      }
+
+      setPublishStep('preparing');
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      setPublishStep('uploading');
+      const response = await contentAPI.publishContent(generatedContent.id, { siteId: selectedSite });
+
+      if (!response.data.success) throw new Error(response.data.message || 'Publishing failed');
+
+      setPublishStep('publishing');
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      setPublishStep('complete');
+
+      setTimeout(() => {
+        const publishData = response.data.data;
+        const site = availableSites.find(s => s.id === selectedSite);
+        const params = new URLSearchParams({
+          published: 'true',
+          wordpressUrl: publishData?.wordpressUrl || '',
+          postId: publishData?.wordpressPostId || '',
+          siteName: site?.name || publishData?.site || '',
+          publishedAt: new Date().toISOString()
+        });
+        router.push(`/articles/${generatedContent.id}?${params.toString()}`);
+      }, 2000);
+
+    } catch (error: any) {
+      let errorMessage = 'Failed to publish content';
+      if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+        errorMessage = 'Publishing timed out. Please check your WordPress site.';
+      } else if (error.response?.status === 500) {
+        errorMessage = 'WordPress server error. Please check your WordPress site.';
+      } else if (error.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      setPublishError(errorMessage);
+      setPublishStep('error');
+    }
+  };
+
+  const getStepStatus = (stepName: string) => {
+    const stepOrder = ['keyword', 'site', 'generate', 'edit'];
+    const currentIndex = stepOrder.indexOf(step);
+    const stepIndex = stepOrder.indexOf(stepName);
+    if (stepIndex < currentIndex) return 'completed';
+    if (stepIndex === currentIndex) return 'current';
+    return 'upcoming';
+  };
+
+  const getDifficultyColor = (difficulty: number) => {
+    if (difficulty <= 30) return 'text-green-600 bg-green-50';
+    if (difficulty <= 60) return 'text-yellow-600 bg-yellow-50';
+    return 'text-red-600 bg-red-50';
+  };
+
+  const formatTimeAgo = (date: Date | null) => {
+    if (!date) return '';
+    const seconds = Math.floor((new Date().getTime() - date.getTime()) / 1000);
+    if (seconds < 60) return 'just now';
+    if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours ago`;
+    return date.toLocaleString();
+  };
+
+  const selectedDocsWordCount = knowledgeDocs
+    .filter(doc => settings.selectedDocIds.includes(doc.id))
+    .reduce((sum, doc) => sum + ((doc as any).totalWords || 0), 0);
+
+  return (
+    <DashboardLayout>
+      <div className="space-y-6">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+              Enhanced Content Creation
+            </h1>
+            <p className="text-gray-600 dark:text-gray-400 mt-1">
+              Generate AI-powered content with advanced customization options
+            </p>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+              <Zap className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+              <span className="text-sm font-medium text-blue-600 dark:text-blue-400">
+                {(user?.wordCredits || user?.credits || 0).toLocaleString()} credits remaining
+              </span>
+            </div>
+            {availableSites.length > 0 && (
+              <div className="flex items-center gap-2 px-3 py-2 bg-green-50 dark:bg-green-900/20 rounded-lg">
+                <Globe className="w-4 h-4 text-green-600 dark:text-green-400" />
+                <span className="text-sm font-medium text-green-600 dark:text-green-400">
+                  {availableSites.length} site{availableSites.length !== 1 ? 's' : ''} connected
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Progress Steps */}
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+          <div className="flex items-center justify-between">
+            {[
+              { key: 'keyword', label: 'Choose Topic', icon: Target, description: 'Select or enter your topic' },
+              { key: 'site', label: 'Choose Site', icon: Globe, description: 'Select WordPress site' },
+              { key: 'generate', label: 'Generate Content', icon: Brain, description: 'AI creates your content' },
+              { key: 'edit', label: 'Review & Publish', icon: Edit3, description: 'Edit and publish' }
+            ].map((stepItem, index) => {
+              const status = getStepStatus(stepItem.key);
+              const Icon = stepItem.icon;
+              return (
+                <div key={stepItem.key} className="flex items-center">
+                  <div className="text-center">
+                    <div className={`flex items-center justify-center w-12 h-12 rounded-full mb-2 ${
+                      status === 'completed' ? 'bg-green-100 text-green-600'
+                      : status === 'current' ? 'bg-blue-100 text-blue-600'
+                      : 'bg-gray-100 text-gray-400'
+                    }`}>
+                      {status === 'completed' ? <Check className="w-6 h-6" /> : <Icon className="w-6 h-6" />}
+                    </div>
+                    <div className={`text-sm font-medium ${
+                      status === 'current' ? 'text-blue-600'
+                      : status === 'completed' ? 'text-green-600'
+                      : 'text-gray-400'
+                    }`}>{stepItem.label}</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">{stepItem.description}</div>
+                  </div>
+                  {index < 3 && <ArrowRight className="w-6 h-6 text-gray-300 mx-4" />}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Error Message */}
+        {error && (
+          <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4">
+            <div className="flex items-start">
+              <AlertCircle className="w-5 h-5 text-red-400 mr-3 flex-shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p className="text-sm text-red-700 dark:text-red-300 mt-1">{error}</p>
+              </div>
+              <button onClick={() => setError(null)} className="text-red-400 hover:text-red-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Success Message */}
+        {successMessage && (
+          <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl p-4">
+            <div className="flex items-start">
+              <CheckCircle className="w-5 h-5 text-green-400 mr-3 flex-shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p className="text-sm text-green-700 dark:text-green-300">{successMessage}</p>
+              </div>
+              <button onClick={() => setSuccessMessage(null)} className="text-green-400 hover:text-green-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Loading State */}
+        {loading && (
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-8">
+            <div className="max-w-2xl mx-auto">
+              <div className="text-center mb-6">
+                <div className="relative inline-block">
+                  <RefreshCw className="w-12 h-12 text-blue-600 animate-spin" />
+                  <Sparkles className="w-6 h-6 text-yellow-500 absolute -top-1 -right-1" />
+                </div>
+                <h3 className="text-xl font-semibold text-gray-900 dark:text-white mt-4 mb-2">
+                  Generating {CONTENT_MODES[settings.contentMode].label} with {MODEL_CONFIG[selectedModel].label}
+                </h3>
+                <p className="text-gray-600 dark:text-gray-400">{loadingStage}</p>
+              </div>
+              <div className="mb-6">
+                <div className="flex justify-between text-sm text-gray-600 dark:text-gray-400 mb-2">
+                  <span>Progress</span>
+                  <span className="font-medium">{loadingProgress}%</span>
+                </div>
+                <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-blue-500 to-purple-600 rounded-full transition-all duration-1000 ease-out"
+                    style={{ width: `${loadingProgress}%` }}
+                  />
+                </div>
+              </div>
+              <div className="mt-6 text-center text-xs text-gray-500 dark:text-gray-400">
+                This may take 30-60 seconds depending on content length and model selection
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Step 1: Topic Selection */}
+        {step === 'keyword' && !loading && (
+          <div className="space-y-6">
+            {/* Topic Selection */}
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                <Target className="w-5 h-5" />
+                Choose Your Topic
+              </h3>
+
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                  Select from Saved Keywords
+                </label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {savedKeywords.slice(0, 6).map((keyword) => (
+                    <div
+                      key={keyword.id}
+                      onClick={() => { setSelectedKeyword(keyword); setCustomTopic(''); }}
+                      className={`p-4 border-2 rounded-lg cursor-pointer transition-all ${
+                        selectedKeyword?.id === keyword.id
+                          ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                          : 'border-gray-200 dark:border-gray-700 hover:border-gray-300'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <h4 className="font-medium text-gray-900 dark:text-white">{keyword.keyword}</h4>
+                        <span className={`px-2 py-1 text-xs font-medium rounded-full ${getDifficultyColor(keyword.difficulty)}`}>
+                          {keyword.difficulty}
+                        </span>
+                      </div>
+                      <div className="text-sm text-gray-600 dark:text-gray-400">
+                        {keyword.searchVolume.toLocaleString()} searches/month
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Or Enter Custom Topic
+                </label>
+                <input
+                  type="text"
+                  value={customTopic}
+                  onChange={(e) => { setCustomTopic(e.target.value); if (e.target.value) setSelectedKeyword(null); }}
+                  placeholder="Enter your topic or keyword..."
+                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                />
+              </div>
+            </div>
+
+            {/* Content Mode Selection */}
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2 flex items-center gap-2">
+                <Layers className="w-5 h-5" />
+                Content Mode
+              </h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+                Determines structure, voice, and formatting. Defaults update automatically.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                {(Object.entries(CONTENT_MODES) as [ContentMode, typeof CONTENT_MODES[ContentMode]][]).map(([key, mode]) => (
+                  <div
+                    key={key}
+                    onClick={() => applyModeDefaults(key)}
+                    className={`p-4 border-2 rounded-lg cursor-pointer transition-all ${
+                      settings.contentMode === key
+                        ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 shadow-md'
+                        : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-xl">{mode.icon}</span>
+                      <h4 className="font-semibold text-sm text-gray-900 dark:text-white">{mode.label}</h4>
+                      {settings.contentMode === key && <Check className="w-4 h-4 text-blue-500 ml-auto" />}
+                    </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">{mode.description}</p>
+                    <div className="mt-2 text-xs text-blue-600 dark:text-blue-400 font-medium">
+                      ~{mode.defaults.wordCount.toLocaleString()} words
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Knowledgebase Context */}
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                <BookOpen className="w-5 h-5" />
+                Knowledgebase Context
+              </h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                Select documents to inject as context into the AI prompt.
+              </p>
+              {loadingKnowledgeDocs ? (
+                <div className="text-sm text-gray-500">Loading knowledgebase documents...</div>
+              ) : knowledgeDocs.length === 0 ? (
+                <div className="text-sm text-gray-500">No documents in your knowledgebase yet.</div>
+              ) : (
+                <>
+                  <div className="max-h-48 overflow-y-auto border border-gray-300 dark:border-gray-600 rounded-lg p-3 bg-white dark:bg-gray-700 space-y-2">
+                    {knowledgeDocs.map(doc => {
+                      const isChecked = settings.selectedDocIds.includes(doc.id);
+                      return (
+                        <label key={doc.id} className="flex items-center gap-2 py-1 text-sm cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => {
+                              const updated = e.target.checked
+                                ? [...settings.selectedDocIds, doc.id]
+                                : settings.selectedDocIds.filter(id => id !== doc.id);
+                              setSettings(prev => ({ ...prev, selectedDocIds: updated }));
+                            }}
+                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          <span className="text-gray-800 dark:text-gray-200 flex-1">{doc.title}</span>
+                          {(doc as any).totalWords > 0 && (
+                            <span className="text-xs text-gray-400">{(doc as any).totalWords.toLocaleString()} words</span>
+                          )}
+                          <span className={`text-xs px-2 py-0.5 rounded-full ${
+                            doc.status === 'ready' ? 'bg-green-100 text-green-700' :
+                            doc.status === 'processing' ? 'bg-yellow-100 text-yellow-700' :
+                            'bg-red-100 text-red-700'
+                          }`}>{doc.status}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  {settings.selectedDocIds.length > 0 && (
+                    <div className={`mt-2 text-xs px-3 py-2 rounded-lg ${
+                      selectedDocsWordCount > 8000
+                        ? 'bg-yellow-50 text-yellow-700 dark:bg-yellow-900/20 dark:text-yellow-300'
+                        : 'bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300'
+                    }`}>
+                      {selectedDocsWordCount > 0
+                        ? `~${selectedDocsWordCount.toLocaleString()} words selected${selectedDocsWordCount > 8000 ? ' — large context may increase generation time' : ''}`
+                        : `${settings.selectedDocIds.length} doc${settings.selectedDocIds.length !== 1 ? 's' : ''} selected`}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* Custom Instructions */}
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                <MessageSquare className="w-5 h-5" />
+                Custom Instructions
+              </h3>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Custom Prompt (Optional)
+                  </label>
+                  <textarea
+                    value={settings.customPrompt}
+                    onChange={(e) => setSettings(prev => ({ ...prev, customPrompt: e.target.value }))}
+                    placeholder="Add specific instructions for how you want the content written..."
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    rows={3}
+                  />
+                </div>
+                <div className="border-t pt-4">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    <ExternalLink className="w-4 h-4 inline mr-1" />
+                    Scrape URL for Additional Context
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="url"
+                      value={scrapeUrl}
+                      onChange={(e) => setScrapeUrl(e.target.value)}
+                      placeholder="https://example.com/article"
+                      className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    />
+                    <button
+                      onClick={handleScrape}
+                      disabled={!scrapeUrl || scraping}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      {scraping ? 'Extracting...' : 'Extract'}
+                    </button>
+                  </div>
+                  {scrapeError && <p className="text-sm text-red-600 mt-1">{scrapeError}</p>}
+                  {scrapedText && (
+                    <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                      Scraped {scrapedText.split(/\s+/).length} words.
+                      <button onClick={() => setScrapedText('')} className="ml-2 text-red-400 hover:underline">Clear</button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Advanced Settings */}
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                  <Settings className="w-5 h-5" />
+                  Advanced Settings
+                </h3>
+                <button
+                  onClick={() => setShowAdvancedSettings(!showAdvancedSettings)}
+                  className="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+                >
+                  {showAdvancedSettings ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+                </button>
+              </div>
+
+              {showAdvancedSettings && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Word Count</label>
+                    <input
+                      type="number"
+                      value={settings.wordCount}
+                      onChange={(e) => setSettings(prev => ({ ...prev, wordCount: parseInt(e.target.value) || 1500 }))}
+                      min="300" max="5000" step="100"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    />
+                    <div className="text-xs text-gray-500 mt-1">300 - 5,000 words</div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">SEO Focus</label>
+                    <select
+                      value={settings.seoFocus}
+                      onChange={(e) => setSettings(prev => ({ ...prev, seoFocus: e.target.value as any }))}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    >
+                      <option value="balanced">Balanced SEO</option>
+                      <option value="primary_keyword">Primary Keyword Focus</option>
+                      <option value="semantic_keywords">Semantic Keywords</option>
+                      <option value="long_tail">Long-tail Keywords</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Content Intent</label>
+                    <select
+                      value={settings.contentIntent}
+                      onChange={(e) => setSettings(prev => ({ ...prev, contentIntent: e.target.value as any }))}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    >
+                      <option value="informational">Informational</option>
+                      <option value="navigational">Navigational</option>
+                      <option value="commercial">Commercial</option>
+                      <option value="transactional">Transactional</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Target Keyword Density (%)</label>
+                    <input
+                      type="number"
+                      value={settings.targetKeywordDensity}
+                      onChange={(e) => setSettings(prev => ({ ...prev, targetKeywordDensity: parseFloat(e.target.value) || 1.5 }))}
+                      min="0.5" max="5" step="0.1"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    />
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Call to Action (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={settings.callToAction}
+                      onChange={(e) => setSettings(prev => ({ ...prev, callToAction: e.target.value }))}
+                      placeholder="e.g., Contact us for a free consultation"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    />
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Content Features</label>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                      {[
+                        { key: 'includeIntro', label: 'Introduction' },
+                        { key: 'includeConclusion', label: 'Conclusion' },
+                        { key: 'includeFAQ', label: 'FAQ Section' },
+                        { key: 'includeStatistics', label: 'Statistics' },
+                        { key: 'includeExamples', label: 'Examples' },
+                        { key: 'includeComparisons', label: 'Comparisons' },
+                        { key: 'includeExternalLinks', label: 'External Links' },
+                      ].map(({ key, label }) => (
+                        <label key={key} className="flex items-center">
+                          <input
+                            type="checkbox"
+                            checked={settings[key as keyof EnhancedGenerationSettings] as boolean}
+                            onChange={(e) => setSettings(prev => ({ ...prev, [key]: e.target.checked }))}
+                            className="mr-2 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          <span className="text-sm text-gray-700 dark:text-gray-300">{label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Model Selector */}
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                      Generation Model
+                    </label>
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                      {Object.entries(MODEL_CONFIG).map(([modelKey, modelConfig]) => (
+                        <div
+                          key={modelKey}
+                          onClick={() => setSelectedModel(modelKey as any)}
+                          className={`p-4 border-2 rounded-lg cursor-pointer transition-all ${
+                            selectedModel === modelKey
+                              ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 shadow-md'
+                              : 'border-gray-200 dark:border-gray-700 hover:border-gray-300'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="text-2xl">{modelConfig.icon}</span>
+                            <h4 className="font-semibold text-gray-900 dark:text-white">{modelConfig.label}</h4>
+                          </div>
+                          <p className="text-xs text-gray-600 dark:text-gray-400 mb-2">{modelConfig.description}</p>
+                          <div className="text-sm font-medium text-blue-600 dark:text-blue-400">
+                            {modelConfig.creditMultiplier}x credits
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-3 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                      <p className="text-sm text-blue-700 dark:text-blue-300">
+                        <span className="font-semibold">Estimated cost: </span>
+                        {estimatedCredits.toLocaleString()} credits for {settings.wordCount.toLocaleString()} words
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Next Button */}
+            <div className="flex justify-center">
+              <button
+                onClick={proceedToSiteSelection}
+                disabled={!selectedKeyword && !customTopic.trim()}
+                className="px-8 py-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-3 font-medium text-lg shadow-lg hover:shadow-xl transition-all"
+              >
+                Continue to Site Selection
+                <ArrowRight className="w-6 h-6" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Step 2: Site Selection */}
+        {step === 'site' && !loading && (
+          <div className="space-y-6">
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                    <Globe className="w-5 h-5" />
+                    Choose WordPress Site
+                  </h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                    Select the site where this content will be published
+                  </p>
+                </div>
+                <button
+                  onClick={() => setStep('keyword')}
+                  className="text-gray-600 dark:text-gray-400 hover:text-gray-900 flex items-center gap-2"
+                >
+                  <ArrowRight className="w-4 h-4 rotate-180" />
+                  Back
+                </button>
+              </div>
+
+              {siteError && (
+                <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4 mb-6">
+                  <div className="flex items-center">
+                    <AlertCircle className="w-5 h-5 text-red-400 mr-3" />
+                    <p className="text-sm text-red-700 dark:text-red-300">{siteError}</p>
+                  </div>
+                </div>
+              )}
+
+              {loadingSites ? (
+                <div className="text-center py-12">
+                  <RefreshCw className="w-8 h-8 text-blue-600 mx-auto mb-4 animate-spin" />
+                  <p className="text-gray-600 dark:text-gray-400">Loading your WordPress sites...</p>
+                </div>
+              ) : availableSites.length === 0 ? (
+                <div className="text-center py-12">
+                  <Globe className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">No WordPress Sites Connected</h3>
+                  <p className="text-gray-600 dark:text-gray-400 mb-6 max-w-md mx-auto">
+                    Connect a WordPress site to enable publishing.
+                  </p>
+                  <div className="flex justify-center gap-4">
+                    <button
+                      onClick={() => router.push('/wordpress')}
+                      className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
+                    >
+                      <Plus className="w-5 h-5" />
+                      Connect WordPress Site
+                    </button>
+                    <button
+                      onClick={() => setStep('keyword')}
+                      className="px-6 py-3 border border-gray-300 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700"
+                    >
+                      Go Back
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                    {availableSites.map((site) => (
+                      <div
+                        key={site.id}
+                        onClick={() => { setSelectedSite(site.id); setSiteError(null); }}
+                        className={`p-5 border-2 rounded-lg cursor-pointer transition-all ${
+                          selectedSite === site.id
+                            ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 shadow-md'
+                            : 'border-gray-200 dark:border-gray-700 hover:border-gray-300'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between mb-3">
+                          <div className="flex-1">
+                            <h4 className="font-semibold text-gray-900 dark:text-white mb-1">{site.name}</h4>
+                            <p className="text-sm text-gray-600 dark:text-gray-400 break-all">{site.url}</p>
+                          </div>
+                          <div className={`ml-3 flex-shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center ${
+                            selectedSite === site.id ? 'border-blue-500 bg-blue-500' : 'border-gray-300 dark:border-gray-600'
+                          }`}>
+                            {selectedSite === site.id && <Check className="w-4 h-4 text-white" />}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-4 text-xs text-gray-500">
+                          <span className={`flex items-center gap-1 ${site.isActive ? 'text-green-600' : 'text-gray-500'}`}>
+                            <div className={`w-2 h-2 rounded-full ${site.isActive ? 'bg-green-500' : 'bg-gray-400'}`}></div>
+                            {site.isActive ? 'Active' : 'Inactive'}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <Clock className="w-3 h-3" />
+                            Added {new Date(site.createdAt).toLocaleDateString()}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+                    <button
+                      onClick={() => router.push('/wordpress')}
+                      className="w-full py-3 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-all flex items-center justify-center gap-2 text-gray-600 dark:text-gray-400 hover:text-blue-600"
+                    >
+                      <Plus className="w-5 h-5" />
+                      <span className="font-medium">Connect Another WordPress Site</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Internal Links Configuration */}
+            {settings.includeInternalLinks && selectedSite && availableSites.length > 0 && (
+              <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                    <Link2 className="w-5 h-5" />
+                    Configure Internal Links
+                  </h3>
+                  <button
+                    onClick={loadInternalLinkSuggestions}
+                    disabled={loadingSuggestions}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all ${
+                      loadingSuggestions
+                        ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
+                        : 'bg-blue-600 text-white hover:bg-blue-700'
+                    }`}
+                  >
+                    <RefreshCw className={`w-4 h-4 ${loadingSuggestions ? 'animate-spin' : ''}`} />
+                    {loadingSuggestions ? 'Finding...' : internalLinkSuggestions.length > 0 ? `Refresh (${internalLinkSuggestions.length})` : 'Find Links'}
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Link Density (per 1000 words)
+                    </label>
+                    <input
+                      type="number"
+                      value={settings.internalLinkDensity}
+                      onChange={(e) => setSettings(prev => ({ ...prev, internalLinkDensity: parseInt(e.target.value) || 3 }))}
+                      min="1" max="10"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Maximum Links
+                    </label>
+                    <input
+                      type="number"
+                      value={settings.maxInternalLinks}
+                      onChange={(e) => setSettings(prev => ({ ...prev, maxInternalLinks: parseInt(e.target.value) || 5 }))}
+                      min="1" max="20"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <button
+                    onClick={() => {
+                      setShowInternalLinks(!showInternalLinks);
+                      if (!showInternalLinks && internalLinkSuggestions.length === 0) loadInternalLinkSuggestions();
+                    }}
+                    className="flex items-center gap-2 text-sm text-blue-600 dark:text-blue-400 hover:underline"
+                  >
+                    {showInternalLinks ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                    {loadingSuggestions
+                      ? 'Loading links...'
+                      : internalLinkSuggestions.length > 0
+                      ? `${internalLinkSuggestions.length} links found — ${showInternalLinks ? 'hide' : 'view'}`
+                      : 'Check for available links'}
+                  </button>
+                  {linksLastUpdated && internalLinkSuggestions.length > 0 && (
+                    <span className="text-xs text-gray-500 ml-2">Updated {formatTimeAgo(linksLastUpdated)}</span>
+                  )}
+
+                  {showInternalLinks && !loadingSuggestions && internalLinkSuggestions.length > 0 && (
+                    <div className="mt-3 space-y-2 max-h-72 overflow-y-auto">
+                      {internalLinkSuggestions.map((suggestion, index) => (
+                        <div key={index} className="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600">
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1 mr-3">
+                              <p className="text-sm font-medium text-gray-900 dark:text-white">{suggestion.title}</p>
+                              <a href={suggestion.url} target="_blank" rel="noopener noreferrer"
+                                className="text-xs text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 mt-1">
+                                {suggestion.url} <ExternalLink className="w-3 h-3" />
+                              </a>
+                            </div>
+                            <span className="text-xs px-2 py-1 rounded-full bg-green-100 text-green-700">
+                              {Math.round(suggestion.relevanceScore * 100)}% match
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {availableSites.length > 0 && (
+              <div className="flex justify-center gap-4">
+                <button
+                  onClick={() => setStep('keyword')}
+                  className="px-6 py-3 border border-gray-300 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-2"
+                >
+                  <ArrowRight className="w-5 h-5 rotate-180" />
+                  Back to Topic
+                </button>
+                <button
+                  onClick={proceedToGeneration}
+                  disabled={!selectedSite}
+                  className="px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-3 font-medium shadow-lg hover:shadow-xl transition-all"
+                >
+                  <Sparkles className="w-5 h-5" />
+                  Generate {CONTENT_MODES[settings.contentMode].label} ({estimatedCredits.toLocaleString()} credits)
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Step 3: Content Generation Results */}
+        {step === 'generate' && generatedContent && !loading && (
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+            <div className="text-center">
+              <CheckCircle className="w-16 h-16 text-green-600 mx-auto mb-4" />
+              <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
+                {CONTENT_MODES[settings.contentMode].label} Generated Successfully!
+              </h3>
+              <p className="text-gray-600 dark:text-gray-400 mb-2">
+                Created with {MODEL_CONFIG[selectedModel].label}
+              </p>
+              {generatedContent.site && (
+                <p className="text-gray-600 dark:text-gray-400 mb-6">
+                  Ready to publish to <span className="font-semibold">{generatedContent.site.name}</span>
+                </p>
+              )}
+
+              <div className="grid grid-cols-3 gap-4 max-w-2xl mx-auto mb-8">
+                <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4">
+                  <div className="text-2xl font-bold text-gray-900 dark:text-white mb-1">{generatedContent.wordCount}</div>
+                  <div className="text-sm text-gray-600 dark:text-gray-400">Words</div>
+                </div>
+                <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4">
+                  <div className="text-2xl font-bold text-gray-900 dark:text-white mb-1">{generatedContent.readingTime}</div>
+                  <div className="text-sm text-gray-600 dark:text-gray-400">Min Read</div>
+                </div>
+                <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4">
+                  <div className="text-2xl font-bold text-gray-900 dark:text-white mb-1">{generatedContent.seoScore}%</div>
+                  <div className="text-sm text-gray-600 dark:text-gray-400">SEO Score</div>
+                </div>
+              </div>
+
+              <div className="flex justify-center gap-4 flex-wrap">
+                <button
+                  onClick={() => router.push(`/articles/${generatedContent.id}/edit`)}
+                  className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
+                >
+                  <Edit3 className="w-5 h-5" />
+                  Edit Content
+                </button>
+                <button
+                  onClick={handlePublish}
+                  disabled={!selectedSite}
+                  className="px-6 py-3 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  <Send className="w-5 h-5" />
+                  Publish Now
+                </button>
+                <button
+                  onClick={() => setShowScheduleModal(true)}
+                  className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2"
+                >
+                  <Calendar className="w-5 h-5" />
+                  Schedule Post
+                </button>
+                <button
+                  onClick={() => router.push('/articles')}
+                  className="px-6 py-3 border border-gray-300 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700"
+                >
+                  View All Articles
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {showScheduleModal && generatedContent && (
+        <ScheduleModal
+          isOpen={showScheduleModal}
+          onClose={() => setShowScheduleModal(false)}
+          onSuccess={() => { setShowScheduleModal(false); router.push('/articles/schedule'); }}
+          // @ts-ignore
+          preselectedContentId={generatedContent.id}
+        />
+      )}
+
+      <PublishProgressModal
+        isOpen={showPublishProgress}
+        currentStep={publishStep}
+        error={publishError}
+        onClose={() => { setShowPublishProgress(false); setPublishStep('validating'); setPublishError(null); }}
+      />
+    </DashboardLayout>
+  );
+}
+
+
+========================================
+FILE: src\app\auth\reset-password\page.tsx
+========================================
+
+'use client';
+
+import { useState, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
+import { Eye, EyeOff, Lock, CheckCircle, XCircle, RefreshCw, AlertCircle } from 'lucide-react';
+import { authAPI } from '@/lib/api';
+
+export default function ResetPasswordPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const token = searchParams?.get('token');
+
+  const [formData, setFormData] = useState({
+    password: '',
+    confirmPassword: '',
+  });
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [error, setError] = useState('');
+  const [countdown, setCountdown] = useState(5);
+
+  useEffect(() => {
+    if (status !== 'success') return;
+    if (countdown === 0) {
+      router.replace('/login');
+      return;
+    }
+    const timer = setTimeout(() => setCountdown(prev => prev - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [status, countdown, router]);
+
+  useEffect(() => {
+    if (!token) {
+      setStatus('error');
+      setError('No reset token found. Please request a new password reset link.');
+    }
+  }, [token]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
+    if (error) setError('');
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (formData.password.length < 8) {
+      setError('Password must be at least 8 characters.');
+      return;
+    }
+
+    if (formData.password !== formData.confirmPassword) {
+      setError('Passwords do not match.');
+      return;
+    }
+
+    setStatus('loading');
+    setError('');
+
+    try {
+      await authAPI.post('/auth/reset-password', {
+        token,
+        password: formData.password,
+        newPassword: formData.password,
+        confirmPassword: formData.confirmPassword,
+      });
+      setStatus('success');
+    } catch (err: any) {
+      setStatus('error');
+      setError(
+        err?.response?.data?.message ||
+        err?.message ||
+        'Failed to reset password. The link may have expired.'
+      );
+    }
+  };
+
+  if (status === 'success') {
+    return (
+      <div className="fixed inset-0 bg-white z-50 overflow-y-auto">
+        <div className="w-full max-w-md mx-auto min-h-screen flex flex-col justify-center py-12 px-4">
+          <div className="text-center mb-8">
+            <div className="flex justify-center mb-4">
+              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center">
+                <CheckCircle className="h-8 w-8 text-green-600" />
+              </div>
+            </div>
+            <h2 className="text-3xl font-bold text-gray-900 mb-2">Password Reset!</h2>
+            <p className="text-gray-600">Your password has been changed successfully.</p>
+          </div>
+
+          <div className="bg-green-50 border border-green-200 rounded-md p-4 mb-6">
+            <h3 className="text-sm font-medium text-green-800 mb-2">You're all set:</h3>
+            <ol className="text-sm text-green-700 space-y-1 list-decimal list-inside">
+              <li>Your new password is now active</li>
+              <li>Sign in with your new credentials</li>
+              <li>Keep your password safe</li>
+            </ol>
+          </div>
+
+          <div className="space-y-3">
+            <Link
+              href="/login"
+              className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+            >
+              Go to Login
+            </Link>
+            <p className="text-center text-sm text-gray-500">
+              Redirecting automatically in {countdown} second{countdown !== 1 ? 's' : ''}...
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (status === 'error' && !token) {
+    return (
+      <div className="fixed inset-0 bg-white z-50 overflow-y-auto">
+        <div className="w-full max-w-md mx-auto min-h-screen flex flex-col justify-center py-12 px-4">
+          <div className="text-center mb-8">
+            <div className="flex justify-center mb-4">
+              <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center">
+                <XCircle className="h-8 w-8 text-red-600" />
+              </div>
+            </div>
+            <h2 className="text-3xl font-bold text-gray-900 mb-2">Invalid Link</h2>
+            <p className="text-gray-600">{error}</p>
+          </div>
+
+          <div className="bg-red-50 border border-red-200 rounded-md p-4 mb-6">
+            <h3 className="text-sm font-medium text-red-800 mb-2">What you can do:</h3>
+            <ol className="text-sm text-red-700 space-y-1 list-decimal list-inside">
+              <li>Request a new password reset link below</li>
+              <li>Check your email and click the new link</li>
+              <li>Links expire after 1 hour</li>
+            </ol>
+          </div>
+
+          <div className="space-y-3">
+            <Link
+              href="/forgot-password"
+              className="w-full flex justify-center items-center py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+            >
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Request new reset link
+            </Link>
+            <Link
+              href="/login"
+              className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+            >
+              Go to Login
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 bg-white z-50 overflow-y-auto">
+      <div className="w-full max-w-md mx-auto min-h-screen flex flex-col justify-center py-12 px-4">
+        <div className="text-center mb-8">
+          <div className="flex justify-center mb-4">
+            <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center">
+              <Lock className="h-8 w-8 text-blue-600" />
+            </div>
+          </div>
+          <h2 className="text-3xl font-bold text-gray-900 mb-2">Choose a new password</h2>
+          <p className="text-gray-600">
+            Must be at least 8 characters with uppercase, lowercase, number and special character.
+          </p>
+        </div>
+
+        {error && (
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-md flex items-start">
+            <AlertCircle className="h-5 w-5 text-red-400 mt-0.5 mr-3 flex-shrink-0" />
+            <div className="text-sm text-red-700">{error}</div>
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <div>
+            <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
+              New password
+            </label>
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <Lock className="h-5 w-5 text-gray-400" />
+              </div>
+              <input
+                id="password"
+                name="password"
+                type={showPassword ? 'text' : 'password'}
+                required
+                value={formData.password}
+                onChange={handleChange}
+                className="block w-full rounded-md border border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 py-2 px-3 pl-10 pr-10"
+                placeholder="Enter new password"
+                disabled={status === 'loading'}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute inset-y-0 right-0 pr-3 flex items-center"
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+              >
+                {showPassword
+                  ? <EyeOff className="h-5 w-5 text-gray-400 hover:text-gray-600" />
+                  : <Eye className="h-5 w-5 text-gray-400 hover:text-gray-600" />
+                }
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-1">
+              Confirm new password
+            </label>
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <Lock className="h-5 w-5 text-gray-400" />
+              </div>
+              <input
+                id="confirmPassword"
+                name="confirmPassword"
+                type={showConfirmPassword ? 'text' : 'password'}
+                required
+                value={formData.confirmPassword}
+                onChange={handleChange}
+                className="block w-full rounded-md border border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 py-2 px-3 pl-10 pr-10"
+                placeholder="Confirm new password"
+                disabled={status === 'loading'}
+              />
+              <button
+                type="button"
+                onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                className="absolute inset-y-0 right-0 pr-3 flex items-center"
+                aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}
+              >
+                {showConfirmPassword
+                  ? <EyeOff className="h-5 w-5 text-gray-400 hover:text-gray-600" />
+                  : <Eye className="h-5 w-5 text-gray-400 hover:text-gray-600" />
+                }
+              </button>
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            disabled={status === 'loading'}
+            className="w-full flex justify-center items-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {status === 'loading' ? (
+              <>
+                <RefreshCw className="animate-spin h-4 w-4 mr-2" />
+                Resetting password...
+              </>
+            ) : (
+              'Reset password'
+            )}
+          </button>
+        </form>
+
+        <div className="text-center mt-6">
+          <Link href="/login" className="text-sm font-medium text-blue-600 hover:text-blue-500">
+            Back to Login
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+========================================
+FILE: src\app\auth\verify-email\page.tsx
+========================================
+
+'use client';
+
+import { useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
+import { CheckCircle, XCircle, RefreshCw, Mail } from 'lucide-react';
+import { authAPI } from '@/lib/api';
+
+export default function VerifyEmailPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const token = searchParams?.get('token');
+
+  const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
+  const [message, setMessage] = useState('');
+  const [countdown, setCountdown] = useState(3);
+
+  useEffect(() => {
+    if (!token) {
+      setStatus('error');
+      setMessage('No verification token found. Please check your email link.');
+      return;
+    }
+
+    const verifyEmail = async () => {
+      try {
+        const response = await authAPI.get(`/auth/verify-email/${token}`);
+        if (response.data.success) {
+          setStatus('success');
+          setMessage('Your email has been verified successfully!');
+        } else {
+          setStatus('error');
+          setMessage(response.data.message || 'Verification failed.');
+        }
+      } catch (err: any) {
+        setStatus('error');
+        setMessage(err.response?.data?.message || 'Invalid or expired verification link.');
+      }
+    };
+
+    verifyEmail();
+  }, [token, router]);
+
+  // Countdown timer on success
+  useEffect(() => {
+    if (status !== 'success') return;
+    if (countdown === 0) {
+      router.replace('/login');
+      return;
+    }
+    const timer = setTimeout(() => setCountdown(prev => prev - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [status, countdown, router]);
+
+  return (
+    <div className="fixed inset-0 bg-white z-50 overflow-y-auto">
+    <div className="w-full max-w-md mx-auto min-h-screen flex flex-col justify-center py-12 px-4">
+
+      {/* Loading state */}
+      {status === 'loading' && (
+        <>
+          <div className="text-center mb-8">
+            <div className="flex justify-center mb-4">
+              <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center">
+                <RefreshCw className="h-8 w-8 text-blue-600 animate-spin" />
+              </div>
+            </div>
+            <h2 className="text-3xl font-bold text-gray-900 mb-2">Verifying your email</h2>
+            <p className="text-gray-600">Please wait a moment while we confirm your account.</p>
+          </div>
+
+          <div className="bg-blue-50 border border-blue-200 rounded-md p-4">
+            <h3 className="text-sm font-medium text-blue-800 mb-2">What's happening:</h3>
+            <ol className="text-sm text-blue-700 space-y-1 list-decimal list-inside">
+              <li>Validating your verification link</li>
+              <li>Activating your account</li>
+              <li>Redirecting you to login</li>
+            </ol>
+          </div>
+        </>
+      )}
+
+      {/* Success state */}
+      {status === 'success' && (
+        <>
+          <div className="text-center mb-8">
+            <div className="flex justify-center mb-4">
+              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center">
+                <CheckCircle className="h-8 w-8 text-green-600" />
+              </div>
+            </div>
+            <h2 className="text-3xl font-bold text-gray-900 mb-2">Email Verified!</h2>
+            <p className="text-gray-600">{message}</p>
+          </div>
+
+          <div className="bg-green-50 border border-green-200 rounded-md p-4 mb-6">
+            <h3 className="text-sm font-medium text-green-800 mb-2">You're all set:</h3>
+            <ol className="text-sm text-green-700 space-y-1 list-decimal list-inside">
+              <li>Your account is now active</li>
+              <li>You can sign in with your credentials</li>
+              <li>Start using ContentAI Pro</li>
+            </ol>
+          </div>
+
+          <div className="space-y-3">
+            <Link
+              href="/login"
+              className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+            >
+              Go to Login
+            </Link>
+            <p className="text-center text-sm text-gray-500">
+              Redirecting automatically in {countdown} second{countdown !== 1 ? 's' : ''}...
+            </p>
+          </div>
+        </>
+      )}
+
+      {/* Error state */}
+      {status === 'error' && (
+        <>
+          <div className="text-center mb-8">
+            <div className="flex justify-center mb-4">
+              <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center">
+                <XCircle className="h-8 w-8 text-red-600" />
+              </div>
+            </div>
+            <h2 className="text-3xl font-bold text-gray-900 mb-2">Verification Failed</h2>
+            <p className="text-gray-600">{message}</p>
+          </div>
+
+          <div className="bg-red-50 border border-red-200 rounded-md p-4 mb-6">
+            <h3 className="text-sm font-medium text-red-800 mb-2">What you can do:</h3>
+            <ol className="text-sm text-red-700 space-y-1 list-decimal list-inside">
+              <li>Request a new verification email below</li>
+              <li>Check your inbox and click the new link</li>
+              <li>Links expire after 24 hours</li>
+            </ol>
+          </div>
+
+          <div className="space-y-3">
+            <Link
+              href="/auth/verify-email"
+              className="w-full flex justify-center items-center py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+            >
+              <Mail className="h-4 w-4 mr-2" />
+              Resend verification email
+            </Link>
+            <Link
+              href="/login"
+              className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+            >
+              Go to Login
+            </Link>
+          </div>
+
+          <p className="mt-8 text-center text-sm text-gray-600">
+            Need a new account?{' '}
+            <Link href="/register" className="font-medium text-blue-600 hover:text-blue-500">
+              Register again
+            </Link>
+          </p>
+        </>
+      )}
+
+    </div>
+    </div>
+  );
+}
+
+
+========================================
+FILE: src\app\oauth\callback\page.tsx
+========================================
+
+// frontend/src/app/oauth/callback/page.tsx
+'use client';
+
+import { useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { CheckCircle, XCircle, Loader } from 'lucide-react';
+
+export default function OAuthCallbackPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
+  const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    const handleCallback = async () => {
+      // Check for Google OAuth token (from auth.controller.ts googleCallback)
+      const token = searchParams.get('token');
+      const refreshToken = searchParams.get('refreshToken');
+      
+      // Check for WordPress OAuth parameters
+      const wpError = searchParams.get('oauth_error');
+      const wpSuccess = searchParams.get('oauth_success');
+      const siteName = searchParams.get('site_name');
+
+      // Handle Google Authentication
+      if (token) {
+        try {
+          // Store tokens
+          localStorage.setItem('token', token);
+          if (refreshToken) {
+            localStorage.setItem('refreshToken', refreshToken);
+          }
+
+          setStatus('success');
+          setMessage('Successfully signed in with Google!');
+          
+          // Redirect to dashboard after short delay
+          setTimeout(() => {
+            router.push('/dashboard');
+          }, 1500);
+          return;
+        } catch (err) {
+          console.error('Token storage error:', err);
+          setStatus('error');
+          setMessage('Failed to complete authentication. Please try again.');
+          
+          setTimeout(() => {
+            router.push('/login');
+          }, 3000);
+          return;
+        }
+      }
+
+      // Handle WordPress OAuth
+      if (wpError) {
+        setStatus('error');
+        setMessage(decodeURIComponent(wpError));
+        return;
+      }
+
+      if (wpSuccess) {
+        setStatus('success');
+        setMessage(`Successfully connected to ${siteName || 'WordPress site'}!`);
+        
+        // Redirect to WordPress page after a short delay
+        setTimeout(() => {
+          router.push('/wordpress');
+        }, 2000);
+        return;
+      }
+
+      // If no valid parameters, show error
+      setStatus('error');
+      setMessage('Invalid callback parameters');
+      
+      setTimeout(() => {
+        router.push('/login');
+      }, 3000);
+    };
+
+    handleCallback();
+  }, [searchParams, router]);
+
+  const getStatusIcon = () => {
+    switch (status) {
+      case 'loading':
+        return <Loader className="w-12 h-12 text-blue-500 animate-spin" />;
+      case 'success':
+        return <CheckCircle className="w-12 h-12 text-green-500" />;
+      case 'error':
+        return <XCircle className="w-12 h-12 text-red-500" />;
+      default:
+        return null;
+    }
+  };
+
+  const getStatusColor = () => {
+    switch (status) {
+      case 'success':
+        return 'text-green-700 bg-green-50 border-green-200';
+      case 'error':
+        return 'text-red-700 bg-red-50 border-red-200';
+      default:
+        return 'text-blue-700 bg-blue-50 border-blue-200';
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-4">
+      <div className="max-w-md w-full">
+        <div className={`rounded-xl border p-8 text-center ${getStatusColor()}`}>
+          <div className="flex justify-center mb-4">
+            {getStatusIcon()}
+          </div>
+          
+          <h1 className="text-2xl font-bold mb-2">
+            {status === 'loading' && 'Connecting...'}
+            {status === 'success' && 'Connected Successfully!'}
+            {status === 'error' && 'Connection Failed'}
+          </h1>
+          
+          <p className="text-lg mb-6">
+            {message || 'Processing your authentication...'}
+          </p>
+
+          {status === 'loading' && (
+            <p className="text-sm opacity-75">
+              Please wait while we complete the authentication...
+            </p>
+          )}
+
+          {status === 'error' && (
+            <button
+              onClick={() => router.push('/login')}
+              className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+            >
+              Back to Login
+            </button>
+          )}
+
+          {status === 'success' && (
+            <p className="text-sm opacity-75">
+              Redirecting you...
+            </p>
+          )}
+        </div>
+
+        {/* Help section for errors */}
+        {status === 'error' && (
+          <div className="mt-6 p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+            <h3 className="font-medium text-yellow-800 dark:text-yellow-200 mb-2">
+              Troubleshooting Tips
+            </h3>
+            <ul className="text-sm text-yellow-700 dark:text-yellow-300 space-y-1">
+              <li>• Make sure you're using the correct Google account</li>
+              <li>• Check that cookies are enabled in your browser</li>
+              <li>• Try clearing your browser cache and cookies</li>
+              <li>• If the issue persists, try regular email/password login</li>
+            </ul>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+========================================
+FILE: src\app\settings\page.tsx
+========================================
+
+'use client';
+import { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
+import DashboardLayout from '@/components/layout/DashboardLayout';
+import { settingsAPI } from '@/lib/api';
+import { useAuth } from '@/context/AuthProvider';
+import {
+  Bell,
+  Eye,
+  EyeOff,
+  Save,
+  AlertTriangle,
+  Check,
+  Settings as SettingsIcon,
+  Key,
+  Smartphone,
+  User,
+  Lock,
+  Shield,
+  Download,
+  Trash2,
+  Loader2
+} from 'lucide-react';
+
+const SettingsPage = () => {
+  const searchParams = useSearchParams();
+  const tabParam = searchParams.get('tab');
+  
+  // Initialize activeTab from URL parameter or default to 'profile'
+  const [activeTab, setActiveTab] = useState(tabParam || 'profile');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [saveStatus, setSaveStatus] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const { user, refreshUser } = useAuth();
+
+  // Form states - Initialize with empty values
+  const [profileData, setProfileData] = useState({
+    name: '',
+    email: '',
+    bio: '',
+    website: '',
+    company: '',
+    location: ''
+  });
+
+  const [passwordData, setPasswordData] = useState({
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: ''
+  });
+
+  const [notificationSettings, setNotificationSettings] = useState({
+    emailNotifications: true,
+    pushNotifications: false,
+    weeklyReports: true,
+    creditAlerts: true,
+    articleUpdates: false,
+    marketingEmails: false
+  });
+
+  const [preferences, setPreferences] = useState({
+    theme: 'system',
+    language: 'en',
+    timezone: 'America/Los_Angeles',
+    defaultContentType: 'blog',
+    autoSave: true,
+    wordCountDisplay: true
+  });
+
+  const [apiSettings, setApiSettings] = useState({
+    apiKey: '',
+    rateLimit: 100,
+    webhookUrl: '',
+    enableWebhooks: false
+  });
+
+  const [privacySettings, setPrivacySettings] = useState({
+    analyticsTracking: true,
+    dataSharing: false,
+    cookiePreferences: true
+  });
+
+  const [deleteConfirmation, setDeleteConfirmation] = useState({
+    showModal: false,
+    password: ''
+  });
+
+  // Update tab when URL parameter changes
+  useEffect(() => {
+    if (tabParam) {
+      setActiveTab(tabParam);
+    }
+  }, [tabParam]);
+
+  // Load settings from backend
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        setLoading(true);
+        const response = await settingsAPI.getSettings();
+        
+        if (response.data.success) {
+          const settings = response.data.data;
+          
+          // Update form states with backend data
+          setProfileData({
+            name: settings.profile.name || '',
+            email: settings.profile.email || '',
+            bio: settings.profile.bio || '',
+            website: settings.profile.website || '',
+            company: settings.profile.company || '',
+            location: settings.profile.location || ''
+          });
+
+          setNotificationSettings({
+            emailNotifications: settings.notifications.emailNotifications ?? true,
+            pushNotifications: settings.notifications.pushNotifications ?? false,
+            weeklyReports: settings.notifications.weeklyReports ?? true,
+            creditAlerts: settings.notifications.creditAlerts ?? true,
+            articleUpdates: settings.notifications.articleUpdates ?? false,
+            marketingEmails: settings.notifications.marketingEmails ?? false
+          });
+
+          setPreferences({
+            theme: settings.preferences.theme || 'system',
+            language: settings.preferences.language || 'en',
+            timezone: settings.preferences.timezone || 'America/Los_Angeles',
+            defaultContentType: settings.preferences.defaultContentType || 'blog',
+            autoSave: settings.preferences.autoSave ?? true,
+            wordCountDisplay: settings.preferences.wordCountDisplay ?? true
+          });
+
+          setApiSettings({
+            apiKey: settings.api.apiKey || '',
+            rateLimit: settings.api.rateLimit || 100,
+            webhookUrl: settings.api.webhookUrl || '',
+            enableWebhooks: settings.api.enableWebhooks ?? false
+          });
+        }
+      } catch (error: any) {
+        // console.error suppressed in production
+        setError('Failed to load settings');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadSettings();
+  }, []);
+
+  const tabs = [
+    { id: 'profile', name: 'Profile', icon: User },
+    { id: 'security', name: 'Security', icon: Lock },
+    { id: 'notifications', name: 'Notifications', icon: Bell },
+    { id: 'preferences', name: 'Preferences', icon: SettingsIcon },
+    { id: 'api', name: 'API & Integrations', icon: Key },
+    { id: 'data', name: 'Data & Privacy', icon: Shield }
+  ];
+
+  const handleSave = async (section: string) => {
+    setSaveStatus('saving');
+    setError('');
+    
+    try {
+      let response;
+      
+      switch (section) {
+        case 'profile':
+          response = await settingsAPI.updateProfile(profileData);
+          // Update user context with new profile data
+          if (response.data.success) {
+            await refreshUser();
+          }
+          break;
+        case 'notifications':
+          response = await settingsAPI.updateNotifications(notificationSettings);
+          break;
+        case 'preferences':
+          response = await settingsAPI.updatePreferences(preferences as any);
+          break;
+        case 'api':
+          response = await settingsAPI.updateApiSettings(apiSettings);
+          if (response.data.success && response.data.data.apiKey) {
+            setApiSettings(prev => ({
+              ...prev,
+              apiKey: response.data.data.apiKey
+            }));
+          }
+          break;
+        case 'security':
+          if (!passwordData.currentPassword || !passwordData.newPassword || !passwordData.confirmPassword) {
+            throw new Error('All password fields are required');
+          }
+          if (passwordData.newPassword !== passwordData.confirmPassword) {
+            throw new Error('New passwords do not match');
+          }
+          response = await settingsAPI.changePassword(passwordData);
+          // Clear password fields on success
+          setPasswordData({
+            currentPassword: '',
+            newPassword: '',
+            confirmPassword: ''
+          });
+          break;
+        default:
+          throw new Error('Unknown section');
+      }
+
+      if (response.data.success) {
+        setSaveStatus('saved');
+        setTimeout(() => setSaveStatus(''), 2000);
+      } else {
+        throw new Error(response.data.message || 'Save failed');
+      }
+    } catch (error: any) {
+
+      setError(error.message || 'Failed to save changes');
+      setSaveStatus('error');
+      setTimeout(() => setSaveStatus(''), 3000);
+    }
+  };
+
+  const handleExport = async (format: 'json' | 'csv') => {
+    try {
+      const response = await settingsAPI.exportData(format);
+      
+      if (format === 'json') {
+        const blob = new Blob([JSON.stringify(response.data.data, null, 2)], 
+          { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'user-data.json';
+        a.click();
+        URL.revokeObjectURL(url);
+      } else {
+        // Handle CSV blob response
+        const url = URL.createObjectURL(response.data);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'user-data.csv';
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+    } catch (error: any) {
+
+      setError('Failed to export data');
+    }
+  };
+
+  // handleRegenerateApiKey: removed — backend route not yet implemented
+
+  const handleDeleteAccount = async () => {
+    if (!deleteConfirmation.password) {
+      setError('Password is required to delete account');
+      return;
+    }
+
+    if (!window.confirm('Are you absolutely sure? This action cannot be undone and will permanently delete all your data.')) {
+      return;
+    }
+
+    try {
+      setSaveStatus('saving');
+      const response = await settingsAPI.deleteAccount({ 
+        confirmPassword: deleteConfirmation.password 
+      });
+      
+      if (response.data.success) {
+        // Logout and redirect
+        window.location.href = '/login?deleted=true';
+      }
+    } catch (error: any) {
+      if (process.env.NODE_ENV === 'development') console.error('Delete account error:', error);
+      setError(error.response?.data?.message || 'Failed to delete account');
+      setSaveStatus('error');
+      setTimeout(() => setSaveStatus(''), 3000);
+    } finally {
+      setDeleteConfirmation({ showModal: false, password: '' });
+    }
+  };
+
+  const SaveButton = ({ onClick, section }: { onClick: (section: string) => void; section: string }) => (
+    <button
+      onClick={() => onClick(section)}
+      disabled={saveStatus === 'saving'}
+      className="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white text-sm font-medium rounded-lg transition-colors"
+    >
+      {saveStatus === 'saving' ? (
+        <>
+          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+          Saving...
+        </>
+      ) : saveStatus === 'saved' ? (
+        <>
+          <Check className="w-4 h-4 mr-2" />
+          Saved!
+        </>
+      ) : (
+        <>
+          <Save className="w-4 h-4 mr-2" />
+          Save Changes
+        </>
+      )}
+    </button>
+  );
+
+  const renderProfileTab = () => (
+    <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
+      <div className="mb-6">
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Profile Information</h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Update your personal information and profile details.</p>
+      </div>
+      
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            Full Name
+          </label>
+          <input
+            type="text"
+            value={profileData.name}
+            onChange={(e) => setProfileData({...profileData, name: e.target.value})}
+            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            Email Address
+          </label>
+          <input
+            type="email"
+            value={profileData.email}
+            onChange={(e) => setProfileData({...profileData, email: e.target.value})}
+            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            Company
+          </label>
+          <input
+            type="text"
+            value={profileData.company}
+            onChange={(e) => setProfileData({...profileData, company: e.target.value})}
+            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            Location
+          </label>
+          <input
+            type="text"
+            value={profileData.location}
+            onChange={(e) => setProfileData({...profileData, location: e.target.value})}
+            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+          />
+        </div>
+
+        <div className="md:col-span-2">
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            Website
+          </label>
+          <input
+            type="url"
+            value={profileData.website}
+            onChange={(e) => setProfileData({...profileData, website: e.target.value})}
+            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+          />
+        </div>
+
+        <div className="md:col-span-2">
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            Bio
+          </label>
+          <textarea
+            rows={4}
+            value={profileData.bio}
+            onChange={(e) => setProfileData({...profileData, bio: e.target.value})}
+            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+            placeholder="Tell us about yourself..."
+          />
+        </div>
+      </div>
+
+      <div className="flex justify-end mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
+        <SaveButton onClick={handleSave} section="profile" />
+      </div>
+    </div>
+  );
+
+  const renderSecurityTab = () => (
+    <div className="space-y-6">
+      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
+        <div className="mb-6">
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Change Password</h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Update your password to keep your account secure.</p>
+        </div>
+        
+        <div className="space-y-4 max-w-md">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              Current Password
+            </label>
+            <div className="relative">
+              <input
+                type={showCurrentPassword ? 'text' : 'password'}
+                value={passwordData.currentPassword}
+                onChange={(e) => setPasswordData({...passwordData, currentPassword: e.target.value})}
+                className="w-full px-3 py-2 pr-10 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+              />
+              <button
+                type="button"
+                onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              >
+                {showCurrentPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              New Password
+            </label>
+            <div className="relative">
+              <input
+                type={showNewPassword ? 'text' : 'password'}
+                value={passwordData.newPassword}
+                onChange={(e) => setPasswordData({...passwordData, newPassword: e.target.value})}
+                className="w-full px-3 py-2 pr-10 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+              />
+              <button
+                type="button"
+                onClick={() => setShowNewPassword(!showNewPassword)}
+                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              >
+                {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              Confirm New Password
+            </label>
+            <input
+              type="password"
+              value={passwordData.confirmPassword}
+              onChange={(e) => setPasswordData({...passwordData, confirmPassword: e.target.value})}
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+            />
+          </div>
+        </div>
+
+        <div className="flex justify-end mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
+          <SaveButton onClick={handleSave} section="security" />
+        </div>
+      </div>
+
+      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
+        <div className="mb-6">
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Two-Factor Authentication</h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Add an extra layer of security to your account.</p>
+        </div>
+        
+        <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
+          <div className="flex items-start space-x-3">
+            <Smartphone className="w-5 h-5 text-yellow-600 dark:text-yellow-400 mt-0.5" />
+            <div>
+              <h4 className="text-sm font-medium text-yellow-800 dark:text-yellow-200">
+                Two-Factor Authentication Disabled
+              </h4>
+              <p className="text-sm text-yellow-700 dark:text-yellow-300 mt-1">
+                Add an extra layer of security to your account by enabling 2FA.
+              </p>
+              <button className="mt-3 px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white text-sm font-medium rounded-lg transition-colors">
+                Enable 2FA
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderNotificationsTab = () => (
+    <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
+      <div className="mb-6">
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Notification Preferences</h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Choose how you want to be notified about important updates.</p>
+      </div>
+      
+      <div className="space-y-6">
+        {Object.entries(notificationSettings).map(([key, value]) => (
+          <div key={key} className="flex items-center justify-between py-3 border-b border-gray-100 dark:border-gray-700 last:border-b-0">
+            <div>
+              <h4 className="text-sm font-medium text-gray-900 dark:text-white">
+                {key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}
+              </h4>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                {getNotificationDescription(key)}
+              </p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={value}
+                onChange={(e) => setNotificationSettings({...notificationSettings, [key]: e.target.checked})}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+            </label>
+          </div>
+        ))}
+      </div>
+
+      <div className="flex justify-end mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
+        <SaveButton onClick={handleSave} section="notifications" />
+      </div>
+    </div>
+  );
+
+  const getNotificationDescription = (key: string) => {
+    const descriptions = {
+      emailNotifications: 'Receive email notifications for important updates',
+      pushNotifications: 'Get push notifications in your browser',
+      weeklyReports: 'Weekly summary of your content performance',
+      creditAlerts: 'Alerts when your credits are running low',
+      articleUpdates: 'Notifications when articles are published',
+      marketingEmails: 'Product updates and marketing communications'
+    };
+    return descriptions[key as keyof typeof descriptions] || '';
+  };
+
+  const renderPreferencesTab = () => (
+    <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
+      <div className="mb-6">
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Application Preferences</h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Customize your application experience and settings.</p>
+      </div>
+      
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            Theme
+          </label>
+          <select
+            value={preferences.theme}
+            onChange={(e) => setPreferences({...preferences, theme: e.target.value as any})}
+            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+          >
+            <option value="system">System Default</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            Language
+          </label>
+          <select
+            value={preferences.language}
+            onChange={(e) => setPreferences({...preferences, language: e.target.value})}
+            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+          >
+            <option value="en">English</option>
+            <option value="es">Español</option>
+            <option value="fr">Français</option>
+            <option value="de">Deutsch</option>
+            <option value="it">Italiano</option>
+            <option value="pt">Português</option>
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            Timezone
+          </label>
+          <select
+            value={preferences.timezone}
+            onChange={(e) => setPreferences({...preferences, timezone: e.target.value})}
+            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+          >
+            <option value="America/Los_Angeles">Pacific Time (PST/PDT)</option>
+            <option value="America/Denver">Mountain Time (MST/MDT)</option>
+            <option value="America/Chicago">Central Time (CST/CDT)</option>
+            <option value="America/New_York">Eastern Time (EST/EDT)</option>
+            <option value="Europe/London">London (GMT/BST)</option>
+            <option value="Europe/Paris">Paris (CET/CEST)</option>
+            <option value="Asia/Tokyo">Tokyo (JST)</option>
+            <option value="Australia/Sydney">Sydney (AEST/AEDT)</option>
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            Default Content Type
+          </label>
+          <select
+            value={preferences.defaultContentType}
+            onChange={(e) => setPreferences({...preferences, defaultContentType: e.target.value as any})}
+            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+          >
+            <option value="blog">Blog Post</option>
+            <option value="article">Article</option>
+            <option value="social">Social Media</option>
+            <option value="email">Email</option>
+            <option value="product">Product Description</option>
+            <option value="landing">Landing Page</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="space-y-4 mb-6">
+        <div className="flex items-center justify-between py-3 border-b border-gray-100 dark:border-gray-700">
+          <div>
+            <h4 className="text-sm font-medium text-gray-900 dark:text-white">Auto Save</h4>
+            <p className="text-sm text-gray-500 dark:text-gray-400">Automatically save your work as you type</p>
+          </div>
+          <label className="relative inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              checked={preferences.autoSave}
+              onChange={(e) => setPreferences({...preferences, autoSave: e.target.checked})}
+              className="sr-only peer"
+            />
+            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+          </label>
+        </div>
+
+        <div className="flex items-center justify-between py-3">
+          <div>
+            <h4 className="text-sm font-medium text-gray-900 dark:text-white">Word Count Display</h4>
+            <p className="text-sm text-gray-500 dark:text-gray-400">Show word count while writing content</p>
+          </div>
+          <label className="relative inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              checked={preferences.wordCountDisplay}
+              onChange={(e) => setPreferences({...preferences, wordCountDisplay: e.target.checked})}
+              className="sr-only peer"
+            />
+            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+          </label>
+        </div>
+      </div>
+
+      <div className="flex justify-end pt-6 border-t border-gray-200 dark:border-gray-700">
+        <SaveButton onClick={handleSave} section="preferences" />
+      </div>
+    </div>
+  );
+
+  const renderApiTab = () => (
+    <div className="space-y-6">
+      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
+        <div className="mb-6">
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">API Access</h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Manage your API keys and integration settings.</p>
+        </div>
+        
+        <div className="space-y-6">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              API Key
+            </label>
+            <div className="flex space-x-2">
+              <div className="flex-1 relative">
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  value={apiSettings.apiKey}
+                  readOnly
+                  className="w-full px-3 py-2 pr-10 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              <span className="inline-flex items-center px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 text-xs font-medium rounded-lg border border-gray-200 dark:border-gray-600 cursor-not-allowed">
+                Coming Soon
+              </span>
+            </div>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              Keep your API key secure. Don't share it publicly.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              Rate Limit (requests per minute)
+            </label>
+            <input
+              type="number"
+              value={apiSettings.rateLimit}
+              onChange={(e) => setApiSettings({...apiSettings, rateLimit: parseInt(e.target.value) || 100})}
+              min="1"
+              max="1000"
+              className="w-full max-w-xs px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
+        <div className="mb-6">
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Webhooks</h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Configure webhook notifications for your applications.</p>
+        </div>
+        
+        <div className="space-y-4">
+          <div className="flex items-center justify-between py-3 border-b border-gray-100 dark:border-gray-700">
+            <div>
+              <h4 className="text-sm font-medium text-gray-900 dark:text-white">Enable Webhooks</h4>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Receive HTTP notifications for events</p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={apiSettings.enableWebhooks}
+                onChange={(e) => setApiSettings({...apiSettings, enableWebhooks: e.target.checked})}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+            </label>
+          </div>
+
+          {apiSettings.enableWebhooks && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Webhook URL
+              </label>
+              <input
+                type="url"
+                value={apiSettings.webhookUrl}
+                onChange={(e) => setApiSettings({...apiSettings, webhookUrl: e.target.value})}
+                placeholder="https://your-app.com/webhook"
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+              />
+            </div>
+          )}
+        </div>
+
+        <div className="flex justify-end mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
+          <SaveButton onClick={handleSave} section="api" />
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderDataTab = () => (
+    <div className="space-y-6">
+      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
+        <div className="mb-6">
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Data Export</h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Download your data and content in various formats.</p>
+        </div>
+        
+        <div className="space-y-4">
+          <div className="flex items-center justify-between py-4 border border-gray-200 dark:border-gray-700 rounded-lg px-4">
+            <div>
+              <h4 className="text-sm font-medium text-gray-900 dark:text-white">Export All Data</h4>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Download all your profile data and settings</p>
+            </div>
+            <button
+              onClick={() => handleExport('json')}
+              className="inline-flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg transition-colors"
+            >
+              <Download className="w-4 h-4 mr-2" />
+              Export JSON
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between py-4 border border-gray-200 dark:border-gray-700 rounded-lg px-4">
+            <div>
+              <h4 className="text-sm font-medium text-gray-900 dark:text-white">Export Profile Data</h4>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Download your profile information in CSV format</p>
+            </div>
+            <button
+              onClick={() => handleExport('csv')}
+              className="inline-flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg transition-colors"
+            >
+              <Download className="w-4 h-4 mr-2" />
+              Export CSV
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
+        <div className="mb-6">
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Privacy Settings</h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Control how your data is used and shared.</p>
+        </div>
+        
+        <div className="space-y-4">
+          <div className="flex items-center justify-between py-3 border-b border-gray-100 dark:border-gray-700">
+            <div>
+              <h4 className="text-sm font-medium text-gray-900 dark:text-white">Analytics Tracking</h4>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Allow us to collect usage data to improve the service</p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={privacySettings.analyticsTracking}
+                onChange={(e) => setPrivacySettings(prev => ({ 
+                  ...prev, 
+                  analyticsTracking: e.target.checked 
+                }))}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+            </label>
+          </div>
+
+          <div className="flex items-center justify-between py-3 border-b border-gray-100 dark:border-gray-700">
+            <div>
+              <h4 className="text-sm font-medium text-gray-900 dark:text-white">Data Sharing</h4>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Share anonymized data with partners for research purposes</p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={privacySettings.dataSharing}
+                onChange={(e) => setPrivacySettings(prev => ({ 
+                  ...prev, 
+                  dataSharing: e.target.checked 
+                }))}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+            </label>
+          </div>
+
+          <div className="flex items-center justify-between py-3">
+            <div>
+              <h4 className="text-sm font-medium text-gray-900 dark:text-white">Cookie Preferences</h4>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Allow non-essential cookies for enhanced experience</p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={privacySettings.cookiePreferences}
+                onChange={(e) => setPrivacySettings(prev => ({ 
+                  ...prev, 
+                  cookiePreferences: e.target.checked 
+                }))}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-6">
+        <div className="mb-4">
+          <h3 className="text-lg font-semibold text-red-800 dark:text-red-200 flex items-center">
+            <AlertTriangle className="w-5 h-5 mr-2" />
+            Danger Zone
+          </h3>
+          <p className="text-sm text-red-700 dark:text-red-300 mt-1">These actions cannot be undone. Please proceed with caution.</p>
+        </div>
+        
+        <div className="space-y-4">
+          <div className="flex items-center justify-between py-4 border border-red-200 dark:border-red-800 rounded-lg px-4 bg-white dark:bg-red-900/10">
+            <div>
+              <h4 className="text-sm font-medium text-gray-900 dark:text-white">Delete Account</h4>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Permanently delete your account and all associated data</p>
+            </div>
+            <button 
+              onClick={() => setDeleteConfirmation({ showModal: true, password: '' })}
+              className="inline-flex items-center px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg transition-colors"
+            >
+              <Trash2 className="w-4 h-4 mr-2" />
+              Delete Account
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Delete Account Modal */}
+      {deleteConfirmation.showModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-lg max-w-md w-full p-6 shadow-xl">
+            <div className="mb-4">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center">
+                <AlertTriangle className="w-5 h-5 mr-2 text-red-600" />
+                Confirm Account Deletion
+              </h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
+                This action cannot be undone. All your data, including articles, settings, and credits will be permanently deleted.
+              </p>
+            </div>
+            
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Enter your password to confirm
+              </label>
+              <input
+                type="password"
+                value={deleteConfirmation.password}
+                onChange={(e) => setDeleteConfirmation(prev => ({ 
+                  ...prev, 
+                  password: e.target.value 
+                }))}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                placeholder="Enter your password"
+              />
+            </div>
+
+            <div className="flex items-center justify-end space-x-3">
+              <button
+                onClick={() => setDeleteConfirmation({ showModal: false, password: '' })}
+                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteAccount}
+                disabled={!deleteConfirmation.password || saveStatus === 'saving'}
+                className="inline-flex items-center px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
+              >
+                {saveStatus === 'saving' ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    Delete Account
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  const renderTabContent = () => {
+    switch (activeTab) {
+      case 'profile':
+        return renderProfileTab();
+      case 'security':
+        return renderSecurityTab();
+      case 'notifications':
+        return renderNotificationsTab();
+      case 'preferences':
+        return renderPreferencesTab();
+      case 'api':
+        return renderApiTab();
+      case 'data':
+        return renderDataTab();
+      default:
+        return renderProfileTab();
+    }
+  };
+
+  if (loading) {
+    return (
+      <DashboardLayout>
+        <div className="max-w-6xl mx-auto p-6">
+          <div className="flex items-center justify-center min-h-64">
+            <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+          </div>
+        </div>
+      </DashboardLayout>
+    );
+  }
+
+  return (
+    <DashboardLayout>
+      <div className="max-w-6xl mx-auto p-6">
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Settings</h1>
+          <p className="text-gray-600 dark:text-gray-400 mt-2">
+            Manage your account settings and preferences
+          </p>
+        </div>
+
+        {error && (
+          <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+            <div className="flex items-center">
+              <AlertTriangle className="w-5 h-5 text-red-600 dark:text-red-400 mr-2" />
+              <p className="text-sm text-red-800 dark:text-red-200">{error}</p>
+            </div>
+          </div>
+        )}
+
+        <div className="flex flex-col lg:flex-row gap-6">
+          {/* Sidebar Navigation */}
+          <div className="lg:w-1/4">
+            <nav className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-2">
+              {tabs.map((tab) => {
+                const Icon = tab.icon;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`w-full flex items-center px-3 py-2 text-left text-sm font-medium rounded-lg transition-colors ${
+                      activeTab === tab.id
+                        ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
+                        : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                    }`}
+                  >
+                    <Icon className="w-4 h-4 mr-3" />
+                    {tab.name}
+                  </button>
+                );
+              })}
+            </nav>
+          </div>
+
+          {/* Main Content */}
+          <div className="lg:w-3/4">
+            {renderTabContent()}
+          </div>
+        </div>
+      </div>
+    </DashboardLayout>
+  );
+};
+
+export default SettingsPage;

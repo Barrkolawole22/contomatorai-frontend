@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { useAuth } from '@/context/AuthProvider';
@@ -182,7 +182,7 @@ interface GeneratedContent {
   site?: { id: string; name: string; url: string } | null;
 }
 
-export default function EnhancedCreateArticlePage() {
+function EnhancedCreateArticlePage() {
   const { user, refreshUser } = useAuth();
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -1437,5 +1437,16 @@ export default function EnhancedCreateArticlePage() {
         onClose={() => { setShowPublishProgress(false); setPublishStep('validating'); setPublishError(null); }}
       />
     </DashboardLayout>
+  );
+}
+export default function CreateArticlePage() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-gray-500 dark:text-gray-400">Loading...</div>
+      </div>
+    }>
+      <EnhancedCreateArticlePage />
+    </Suspense>
   );
 }

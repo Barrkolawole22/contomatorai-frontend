@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
-export default function AuthCallbackPage() {
+function AuthCallbackContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [error, setError] = useState<string | null>(null);
@@ -34,8 +34,6 @@ export default function AuthCallbackPage() {
           localStorage.setItem('refreshToken', refreshToken);
         }
 
-        // Fetch and store user data before redirecting so AuthProvider
-        // finds both token + user in localStorage on dashboard load
         try {
           const { authAPI } = await import('@/lib/api');
           const response = await authAPI.getCurrentUser();
@@ -79,5 +77,21 @@ export default function AuthCallbackPage() {
         <p className="text-gray-600">Please wait while we set up your account.</p>
       </div>
     </div>
+  );
+}
+
+export default function AuthCallbackPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <h2 className="text-xl font-semibold text-gray-900 mb-2">Completing sign in...</h2>
+          <p className="text-gray-600">Please wait while we set up your account.</p>
+        </div>
+      </div>
+    }>
+      <AuthCallbackContent />
+    </Suspense>
   );
 }
