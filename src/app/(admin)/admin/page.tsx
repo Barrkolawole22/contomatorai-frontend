@@ -123,7 +123,7 @@ const AdminDashboard = () => {
       
       // Fetch WordPress sites count
       const wpResponse = await adminAPI.wordpress.getWordPressOverview();
-      const connectedSites = wpResponse.data.success ? wpResponse.data.data.length : 0;
+      const connectedSites = wpResponse.data.success ? wpResponse.data.data.statistics.connectedSites : 0;
       
       // Merge data
       const analyticsData = analyticsResponse.data.data;
